@@ -3,6 +3,8 @@ import numba
 from numba import njit, types, prange
 from numba.typed import List, Dict
 
+# Backgammon code for CS McTague's Reinforcement Learning course at
+# Boston College, see https://cs.bc.edu/mctague/t/2025/rl/fproj/
 
 # Type Aliases
 int8 = types.int8
