@@ -456,14 +456,14 @@ def _collect_search_data( state, player, dice ):
     return states_buffer, offsets, afterstates_dict
 
 @njit(parallel=True)
-def _select_optimal_move( values, offets, afterstate_dict ):
+def _select_optimal_move( values, offsets, afterstate_dict ):
     # receives an array of values for leaves of the 2-ply search and
     # selects the action which maximizes the expected value
 
-    afterstates = list(afterstates)
+    afterstates = list(afterstates_dict)
     move_expected_values = np.zeros( len(afterstates), np.float64 )
     
-    for m in prange(len(afterstates_list)):
+    for m in prange(len(afterstates)):
         d=0
         for r1 in range(1,7):
             for r2 in range(1,r1+1):
