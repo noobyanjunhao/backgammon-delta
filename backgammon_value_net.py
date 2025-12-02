@@ -15,7 +15,7 @@ NUM_RESIDUAL_BLOCKS = 6
 class ResidualBlockV2(nn.Module):
     """
     Implements a 1D Residual Block with Pre-activation (V2) structure.
-    BN and ReLU are applied *before* the convolutional layers.
+    LayerNorm and ReLU are applied *before* the convolutional layers.
     """
     channels: int
     kernel_size: int = 3
