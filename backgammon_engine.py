@@ -506,7 +506,7 @@ def _select_optimal_move( values, offsets, afterstate_dict ):
                 if d < NUM_SORTED_ROLLS - 1:
                     end_index = offsets[ m, d+1 ]
                 else:
-                    if m < len(player_moves) - 1:
+                    if m < len(afterstates) - 1:
                         end_index = offsets[ m+1, 0]
                     else:
                         end_index = len(values)
