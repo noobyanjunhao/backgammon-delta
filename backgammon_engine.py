@@ -613,7 +613,9 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
     # from say a JAX array.
 
     (fin_state_buffer, fin_offsets, fin_player_moves,
-     cum_state_counts) = _vectorized_collect_search_data( state, player, dice )
+     cum_state_counts) = _vectorized_collect_search_data( state_vector,
+                                                          player_vector,
+                                                          dice_vector )
 
     fin_value_buffer = batch_value_function( fin_state_buffer )
 
