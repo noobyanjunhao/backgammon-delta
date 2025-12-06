@@ -514,9 +514,7 @@ def _select_optimal_move( values, offsets, afterstate_dict ):
                 move_expected_values[m] += p * minv
                 d = d + 1
 
-    return np.array(
-        afterstate_dict[ afterstates[ np.argmax( move_expected_values ) ] ],
-        dtype=int8 )
+    return afterstate_dict[ afterstates[ np.argmax( move_expected_values ) ] ]
 
 def _2_ply_search( state, player, dice, batch_value_function ):
     # this function calls into the numba code above from the python
