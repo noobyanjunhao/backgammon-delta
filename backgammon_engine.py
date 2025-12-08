@@ -215,6 +215,12 @@ def _reward(state, player):
                     return -3*player
             return -2*player
     return 0
+        
+@njit
+def _act(state, player, move):
+    new_state = _apply_move(state, player, move)
+    reward = _reward(new_state, player)
+    return reward, new_state
 
 @njit
 def _actions(state, current_player, dice):
@@ -236,6 +242,11 @@ def _actions(state, current_player, dice):
 
     if len(all_moves) == 0:
         # If no moves were possible at all (Forced Pass)
+        # no-op is only legal move
+        no_op = List.empty_list(TwoInt8Tuple)
+        all_moves.append( no_op )
+        all_afterstates.append( state )
+
         return all_moves, all_afterstates
     
     # Player must use maximum number of dice possible
@@ -297,7 +308,7 @@ def _state_to_tuple(a):
              int8(a[24]), int8(a[25]), int8(a[26]), int8(a[27]) )
 
 @njit
-def _unique_afterstates(moves, afterstates):
+def _move_afterstate_dict(moves, afterstates):
     # takes parallel arrays of moves and afterstates, and constructs a
     # dictionary whose keys are afterstates and whose values are
     # actions (just one) leading to that afterstate. A list of unique
@@ -463,8 +474,8 @@ def _collect_search_data( state, player, dice ):
     # tree for batch evaluation by the (neural network) value function
 
     player_moves, player_afterstates = _actions( state, player, dice )
-    afterstates_dict = _unique_afterstates(player_moves, player_afterstates)
-    states_buffer = List.empty_list(state)
+    afterstates_dict = _move_afterstate_dict( player_moves, player_afterstates )
+    states_buffer = List.empty_list(StateTuple)
     offsets = np.empty( (len(afterstates_dict), NUM_SORTED_ROLLS), np.int64)
     i = 0
     m = 0
@@ -481,25 +492,25 @@ def _collect_search_data( state, player, dice ):
                 opponent_moves, opponent_afterstates = _actions( opponent_state,
                                                                  -player,
                                                                  opponent_dice )
-                opponent_afterstates = _unique_afterstates( opponent_moves,
-                                                            opponent_afterstates )
-                
+                opponent_afterstates = _move_afterstate_dict( opponent_moves,
+                                                              opponent_afterstates )
+
                 for opponent_afterstate in opponent_afterstates:
-                    opponent_afterstate = np.array( opponent_afterstate, dtype=int8 )
+#                    opponent_afterstate = np.array( opponent_afterstate, dtype=int8 )
                     states_buffer.append(opponent_afterstate)
                     i += 1
         m += 1
 
     return states_buffer, offsets, afterstates_dict
 
-@njit(parallel=True)
-def _select_optimal_move( values, offsets, afterstate_dict ):
+@njit #(parallel=True)
+def _select_optimal_move( value_buffer, offsets, afterstate_dict ):
     # receives an array of values for leaves of the 2-ply search and
     # selects the action which maximizes the expected value
 
     afterstates = list(afterstate_dict)
-    move_expected_values = np.zeros( len(afterstates), np.float64 )
-    
+    move_expected_values = np.zeros( len(afterstate_dict), np.float32 )
+
     for m in prange(len(afterstates)):
         d=0
         for r1 in range(1,7):
@@ -512,12 +523,51 @@ def _select_optimal_move( values, offsets, afterstate_dict ):
                     if m < len(afterstates) - 1:
                         end_index = offsets[ m+1, 0]
                     else:
-                        end_index = len(values)
-                minv = np.min( values[ start_index : end_index ] )
+                        end_index = len(value_buffer)
+                minv = np.min( value_buffer[ start_index : end_index ] )
                 move_expected_values[m] += p * minv
                 d = d + 1
 
     return afterstate_dict[ afterstates[ np.argmax( move_expected_values ) ] ]
+
+@njit
+def _unique_states_bool( state_buffer ):
+    state_dict = Dict.empty( StateTuple, np.bool_ )
+
+    for state in state_buffer:
+        state_dict[state] = True
+
+    return list(state_dict.keys())
+
+@njit
+def _state_value_dict( states, values ):
+    value_dict = Dict.empty( StateTuple, np.float32 )
+
+    for i in range(len(states)):
+        value_dict[ states[i] ] = np.float32( values[i] )
+
+    return value_dict
+
+@njit
+def _lookup_values( state_buffer, value_dict ):
+    l = len(state_buffer)
+    values = np.empty( l, dtype=np.float32 )
+    for i in range(l):
+        values[i] = value_dict[ state_buffer[i] ]
+    return values
+
+def _hashing_batch_value_function( batch_value_function, state_buffer ):
+    # this function removes duplicates from state_buffer,
+    # calls batch_value_function on the shorted buffer,
+    # and then returns values for the original buffer
+    # recreating duplicated values (this is to lighten load on gpu)
+    print( f"state buffer size: {len(state_buffer)}" )
+    states_to_eval = _unique_states_bool( state_buffer )
+    print( f"unique states to evaluate: {len(states_to_eval)}" )
+    values = batch_value_function( states_to_eval )
+    value_dict = _state_value_dict( states_to_eval, values )
+    value_buffer = _lookup_values( state_buffer, value_dict )
+    return value_buffer
 
 def _2_ply_search( state, player, dice, batch_value_function ):
     # this function calls into the numba code above from the python
@@ -529,13 +579,13 @@ def _2_ply_search( state, player, dice, batch_value_function ):
     # to convert, from say a JAX array, to an array numba can work
     # with
 
-    state_buffer, offsets, player_moves = _collect_search_data( state,
-                                                                player,
-                                                                dice )
+    (states_buffer, offsets,
+     afterstates_dict) = _collect_search_data( state, player, dice )
 
-    value_buffer = batch_value_function( state_buffer )
+    value_buffer = batch_value_function( states_buffer )
 
-    return _select_optimal_move( value_buffer, offsets, player_moves )
+    return _select_optimal_move( value_buffer, offsets,
+                                 afterstates_dict )
 
 @njit(parallel=True)
 def _vectorized_collect_search_data( state_vector, player_vector, dice_vector ):
@@ -616,9 +666,7 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
     # from say a JAX array.
 
     (fin_state_buffer, fin_offsets, fin_player_moves,
-     cum_state_counts) = _vectorized_collect_search_data( state_vector,
-                                                          player_vector,
-                                                          dice_vector )
+     cum_state_counts) = _vectorized_collect_search_data( state, player, dice )
 
     fin_value_buffer = batch_value_function( fin_state_buffer )
 
@@ -629,7 +677,7 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
 def _linear_batch_value_function( feature_function, weights, states ):
 
     batch_size = len(states)
-    
+
     values = np.empty( batch_size )
     
     for i in prange( batch_size ):
