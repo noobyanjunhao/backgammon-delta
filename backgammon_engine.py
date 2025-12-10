@@ -457,16 +457,15 @@ def _vectorized_actions_parallel(state_vector, player_vector, dice_vector):
     return actions, afterstates
 
 @njit(parallel=True)
-def _vectorized_apply_move(state_vector, player_vector, dice_vector, move_sequence_vector):
+def _vectorized_apply_move(states, players, move_sequences):
 
-    new_state_vector = np.empty( len(state_vector), dtype=State )
-    
-    for i in prange( len(state_vector) ):
-        new_state_vector[i] = _apply_move( state_vector[i],
-                                           player_vector[i],
-                                           dice_vector[i],
-                                           move_sequence_vector[i] )
-    return new_state_vector
+    new_states = states.copy()
+
+    for i in prange( len(states) ):
+        new_states[i] = _apply_move( states[i],
+                                     players[i],
+                                     move_sequences[i] )
+    return new_states
 
 @njit
 def _collect_search_data( state, player, dice ):
@@ -580,79 +579,79 @@ def _2_ply_search( state, player, dice, batch_value_function ):
     # with
 
     (states_buffer, offsets,
-     afterstates_dict) = _collect_search_data( state, player, dice )
+     afterstate_dicts) = _collect_search_data( state, player, dice )
 
     value_buffer = batch_value_function( states_buffer )
 
     return _select_optimal_move( value_buffer, offsets,
-                                 afterstates_dict )
+                                 afterstate_dicts )
 
 @njit(parallel=True)
 def _vectorized_collect_search_data( state_vector, player_vector, dice_vector ):
     # vectorized version which takes arrays of states, players, and
     # dice, and returns a 1d buffer of states, an array of offset
-    # matrices, and an array of state counts which together which
-    # states belong to which combination of afterstates and dice.
+    # matrices, and an array of state counts which together encode
+    # which states belong to which combination of afterstates and
+    # dice.
     
     batch_size = len(state_vector)
 
-    (state_buffer,
-         offsets,
-         player_moves) = _collect_search_data( state_vector[0],
+    (state_buffer, offsets,
+     afterstate_dict) = _collect_search_data( state_vector[0],
                                                player_vector[0],
                                                dice_vector[0] )
 
-    final_states_buffer_array = List()
-    final_offsets = List()
-    final_player_moves = List()
+    state_buffer_list = List()
+    offsets_list = List()
+    afterstate_dicts = List()
 
-    # Preallocate the arrays so they can be written to in parallel
+    # Preallocate the lists so they can be written to in parallel
     for i in range(batch_size):
-        final_states_buffer_array.append(state_buffer)
-        final_offsets.append(offsets)
-        final_player_moves.append(player_moves)
+        state_buffer_list.append(state_buffer)
+        offsets_list.append(offsets)
+        afterstate_dicts.append(afterstate_dict)
 
     for i in prange(batch_size):
         (state_buffer,
          offsets,
-         player_moves) = _collect_search_data( state_vector[i],
-                                               player_vector[i],
-                                               dice_vector[i] )
+         afterstate_dict) = _collect_search_data( state_vector[i],
+                                                  player_vector[i],
+                                                  dice_vector[i] )
 
-        final_states_buffer_array[i] = state_buffer
-        final_offsets[i] = offsets
-        final_player_moves[i] = player_moves
+        state_buffer_list[i] = state_buffer
+        offsets_list[i] = offsets
+        afterstate_dicts[i] = afterstate_dict
 
     cumulative_state_counts = np.zeros( batch_size + 1, np.int64 )
     cumulative_state_count = 0
     for i in range(batch_size):
         cumulative_state_counts[i] = cumulative_state_count
-        cumulative_state_count += len(final_states_buffer_array[i])
+        cumulative_state_count += len(state_buffer_list[i])
     cumulative_state_counts[batch_size] = cumulative_state_count
 
-    final_states_buffer = List()
-    for state_buffer in final_states_buffer_array:
-        final_states_buffer.extend(state_buffer)
+    combined_state_buffer = List()
+    for state_buffer in state_buffer_list:
+        combined_state_buffer.extend(state_buffer)
 
-    return final_states_buffer, final_offsets, final_player_moves, cumulative_state_counts
+    return combined_state_buffer, offsets_list, afterstate_dicts, cumulative_state_counts
 
 
-@njit(parallel=True)
-def _vectorized_select_optimal_move( final_values, final_offsets, final_player_moves,
+@njit #(parallel=True)
+def _vectorized_select_optimal_move( value_buffer, offsets_list, player_moves,
                                      cumulative_state_counts ):
 
-    batch_size = len(final_offsets)
+    batch_size = len(offsets_list)
     block_start = 0
     block_end = 0
-    optimal_moves = np.empty( batch_size )
-    
-    for i in prange(batch_size):
+    optimal_moves = list()
+
+    for i in range(batch_size):
         optimal_move = _select_optimal_move(
-            final_values[ cumulative_state_counts[i]
+            value_buffer[ cumulative_state_counts[i]
                           : cumulative_state_counts[i+1]],
-            final_offsets[i],
-            final_player_moves[i] )
-        optimal_moves[i] = optimal_move
+            offsets_list[i],
+            player_moves[i] )
+        optimal_moves.append(optimal_move)
 
     return optimal_moves
 
@@ -665,14 +664,16 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
     # array, in particular it's batch_value_function's job to convert
     # from say a JAX array.
 
-    (fin_state_buffer, fin_offsets, fin_player_moves,
-     cum_state_counts) = _vectorized_collect_search_data( state, player, dice )
+    (state_buffer, offsets_list, afterstate_dicts,
+     cumulative_state_counts) = _vectorized_collect_search_data(
+         state_vector, player_vector, dice_vector )
 
-    fin_value_buffer = batch_value_function( fin_state_buffer )
+    value_buffer = batch_value_function( state_buffer )
 
-    return _vectorized_select_optimal_move( fin_value_buffer,
-                                            fin_offsets, fin_player_moves,
-                                            cum_state_counts)
+    return _vectorized_select_optimal_move( value_buffer,
+                                            offsets_list,
+                                            afterstate_dicts,
+                                            cumulative_state_counts)
 @njit(parallel=True)
 def _linear_batch_value_function( feature_function, weights, states ):
 
