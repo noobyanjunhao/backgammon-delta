@@ -704,8 +704,8 @@ def _vectorized_2_ply_search( states, players, dices, batch_value_function ):
 
 @njit
 def _filter_list_by_mask(l, mask):
-    l_true = []
-    l_false = []
+    l_true = List()
+    l_false = List()
     true_indices = List.empty_list(types.int64)
     false_indices = List.empty_list(types.int64)
 
@@ -758,28 +758,31 @@ def _vectorized_2_ply_search_epsilon_greedy( states, players, dices, batch_value
     # randomly select which games will play greedily
     exploit_mask = np.random.rand( len(states) ) >= epsilon
 
-    ( exploit_states, explore_states, exploit_indices,
-      explore_indices ) = _filter_list_by_mask( states,
-                                                exploit_mask )
+    ( exploit_states, explore_states, _, _ ) = _filter_list_by_mask(
+        states, exploit_mask )
 
     exploit_players = players[ exploit_mask ]
     exploit_dices = dices[ exploit_mask ]
 
-    ( state_buffer, offsets_list, afterstate_dicts,
-      cumulative_state_counts ) = _vectorized_collect_search_data(
-          exploit_states, exploit_players, exploit_dices )
+    if len(exploit_states) > 0:
+        ( state_buffer, offsets_list, afterstate_dicts,
+          cumulative_state_counts ) = _vectorized_collect_search_data(
+              exploit_states, exploit_players, exploit_dices )
 
-    value_buffer = batch_value_function( state_buffer )
+        value_buffer = batch_value_function( state_buffer )
 
     explore_players = players[ ~exploit_mask ]
     explore_dices = dices[ ~exploit_mask ]
     explore_moves = _choose_explore_moves( explore_states,
                                            explore_players, explore_dices )
 
-    exploit_moves = _vectorized_select_optimal_move( value_buffer,
-                                                     offsets_list,
-                                                     afterstate_dicts,
-                                                     cumulative_state_counts )
+    if len(exploit_states) > 0:
+        exploit_moves = _vectorized_select_optimal_move( value_buffer,
+                                                         offsets_list,
+                                                         afterstate_dicts,
+                                                         cumulative_state_counts )
+    else:
+        exploit_moves = List.empty_list(Action)
 
     return _splice_moves( exploit_mask, explore_moves, exploit_moves )
 
