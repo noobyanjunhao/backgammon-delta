@@ -473,12 +473,12 @@ def _collect_search_data( state, player, dice ):
     # tree for batch evaluation by the (neural network) value function
 
     player_moves, player_afterstates = _actions( state, player, dice )
-    afterstates_dict = _move_afterstate_dict( player_moves, player_afterstates )
+    afterstate_dict = _move_afterstate_dict( player_moves, player_afterstates )
     states_buffer = List.empty_list(StateTuple)
-    offsets = np.empty( (len(afterstates_dict), NUM_SORTED_ROLLS), np.int64)
+    offsets = np.empty( (len(afterstate_dict), NUM_SORTED_ROLLS), np.int64)
     i = 0
     m = 0
-    for opponent_state in afterstates_dict:
+    for opponent_state in afterstate_dict:
         # convert from tuple back to array
         opponent_state = np.array( opponent_state, dtype=int8 )
         d=0
@@ -500,7 +500,7 @@ def _collect_search_data( state, player, dice ):
                     i += 1
         m += 1
 
-    return states_buffer, offsets, afterstates_dict
+    return states_buffer, offsets, afterstate_dict
 
 @njit #(parallel=True)
 def _select_optimal_move( value_buffer, offsets, afterstate_dict ):
@@ -579,12 +579,40 @@ def _2_ply_search( state, player, dice, batch_value_function ):
     # with
 
     (states_buffer, offsets,
-     afterstate_dicts) = _collect_search_data( state, player, dice )
+     afterstate_dict) = _collect_search_data( state, player, dice )
 
     value_buffer = batch_value_function( states_buffer )
 
     return _select_optimal_move( value_buffer, offsets,
-                                 afterstate_dicts )
+                                 afterstate_dict )
+
+def _2_ply_search_epsilon_greedy( state, player, dice, batch_value_function, epsilon ):
+    # this function calls into the numba code above from the python
+    # interpreter, passes the array of states needing evaluation to a
+    # provided batch_value_function (so that it can for example be
+    # batch evaluated on a gpu), and then passes the resulting values
+    # back to numba code. batch_value_function should return a numpy
+    # or numba array, in particular it is batch_value_function's job
+    # to convert, from say a JAX array, to an array numba can work
+    # with
+
+    if np.random.rand() < epsilon:
+        moves, _ = _actions( state, player, dice )
+        choice = np.random.randint( 0, len(moves) )
+        return moves[choice]
+
+    (state_buffer, offsets,
+     afterstate_dict) = _collect_search_data( state, player, dice )
+
+    # if np.random.rand() < epsilon:
+    #     keys = list( afterstate_dict )
+    #     choice = np.random.randint( 0, len(keys) )
+    #     return afterstate_dict[ keys[choice] ]
+    
+    value_buffer = batch_value_function( state_buffer )
+
+    return _select_optimal_move( value_buffer, offsets,
+                                 afterstate_dict )
 
 @njit(parallel=True)
 def _vectorized_collect_search_data( state_vector, player_vector, dice_vector ):
@@ -635,7 +663,6 @@ def _vectorized_collect_search_data( state_vector, player_vector, dice_vector ):
 
     return combined_state_buffer, offsets_list, afterstate_dicts, cumulative_state_counts
 
-
 @njit #(parallel=True)
 def _vectorized_select_optimal_move( value_buffer, offsets_list, player_moves,
                                      cumulative_state_counts ):
@@ -643,7 +670,7 @@ def _vectorized_select_optimal_move( value_buffer, offsets_list, player_moves,
     batch_size = len(offsets_list)
     block_start = 0
     block_end = 0
-    optimal_moves = list()
+    optimal_moves = List()
 
     for i in range(batch_size):
         optimal_move = _select_optimal_move(
@@ -655,7 +682,7 @@ def _vectorized_select_optimal_move( value_buffer, offsets_list, player_moves,
 
     return optimal_moves
 
-def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_value_function ):
+def _vectorized_2_ply_search( states, players, dices, batch_value_function ):
     # this function calls into the numba code above from the python
     # interpreter, passes the returned array of states to a provided
     # batch_value_function (so that it can for example be batch
@@ -666,7 +693,7 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
 
     (state_buffer, offsets_list, afterstate_dicts,
      cumulative_state_counts) = _vectorized_collect_search_data(
-         state_vector, player_vector, dice_vector )
+         states, players, dices )
 
     value_buffer = batch_value_function( state_buffer )
 
@@ -674,6 +701,88 @@ def _vectorized_2_ply_search( state_vector, player_vector, dice_vector, batch_va
                                             offsets_list,
                                             afterstate_dicts,
                                             cumulative_state_counts)
+
+@njit
+def _filter_list_by_mask(l, mask):
+    l_true = []
+    l_false = []
+    true_indices = List.empty_list(types.int64)
+    false_indices = List.empty_list(types.int64)
+
+    for i in range(len(l)):
+        if mask[i]:
+            l_true.append(l[i])
+            true_indices.append(i)
+        else:
+            l_false.append(l[i])
+            false_indices.append(i)
+
+    return l_true, l_false, true_indices, false_indices
+
+@njit
+def _choose_explore_moves( states, players, dices ):
+    moves = List.empty_list(Action)
+    
+    for i in range(len(states)):
+        moves_i, _ = _actions( states[i], players[i], dices[i] )
+        choice = np.random.randint( 0, len(moves_i) )
+        moves.append( moves_i[choice] )
+
+    return moves
+
+@njit
+def _splice_moves( exploit_mask, explore_moves, exploit_moves ):
+    spliced_moves = List.empty_list(Action)
+    j=0
+    k=0
+    for i in range(len(exploit_mask)):
+        if exploit_mask[i]:
+            spliced_moves.append( exploit_moves[j] )
+            j += 1
+        else:
+            spliced_moves.append( explore_moves[k] )
+            k += 1
+
+    return spliced_moves
+
+def _vectorized_2_ply_search_epsilon_greedy( states, players, dices, batch_value_function, epsilon ):
+    # this function calls into the numba code above from the python
+    # interpreter, passes the array of states needing evaluation to a
+    # provided batch_value_function (so that it can for example be
+    # batch evaluated on a gpu), and then passes the resulting values
+    # back to numba code. batch_value_function should return a numpy
+    # or numba array, in particular it is batch_value_function's job
+    # to convert, from say a JAX array, to an array numba can work
+    # with
+
+    # randomly select which games will play greedily
+    exploit_mask = np.random.rand( len(states) ) >= epsilon
+
+    ( exploit_states, explore_states, exploit_indices,
+      explore_indices ) = _filter_list_by_mask( states,
+                                                exploit_mask )
+
+    exploit_players = players[ exploit_mask ]
+    exploit_dices = dices[ exploit_mask ]
+
+    ( state_buffer, offsets_list, afterstate_dicts,
+      cumulative_state_counts ) = _vectorized_collect_search_data(
+          exploit_states, exploit_players, exploit_dices )
+
+    value_buffer = batch_value_function( state_buffer )
+
+    explore_players = players[ ~exploit_mask ]
+    explore_dices = dices[ ~exploit_mask ]
+    explore_moves = _choose_explore_moves( explore_states,
+                                           explore_players, explore_dices )
+
+    exploit_moves = _vectorized_select_optimal_move( value_buffer,
+                                                     offsets_list,
+                                                     afterstate_dicts,
+                                                     cumulative_state_counts )
+
+    return _splice_moves( exploit_mask, explore_moves, exploit_moves )
+
 @njit(parallel=True)
 def _linear_batch_value_function( feature_function, weights, states ):
 
