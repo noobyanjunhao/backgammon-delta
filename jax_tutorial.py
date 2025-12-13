@@ -25,10 +25,10 @@ model = BackgammonValueNet()
 
 # Initialize model parameters using randomly generated weights
 # (generated deterministically by jax from a provided random seed, by
-# calling model.init(). We have provide it with dummy inputs, because
+# calling model.init(). We have to provide it with dummy inputs, because
 # jax permits model definitions to be concise without pinning down all
 # vector shapes. So model.init() infers them from the provided inputs.
-# Here we generate a batch of 10 inputs with zeros.
+# Here we generate a batch of 32 inputs with zeros.
 
 dummy_planes= jnp.zeros( (32, BOARD_LENGTH, CONV_INPUT_CHANNELS) )
 dummy_aux_features = jnp.zeros( (32, AUX_INPUT_SIZE) )
@@ -231,7 +231,7 @@ checkpointer.close()
 
 # To create a vector of the "same shape" as params (a nested pytree
 # with the the same labels and vector shapes) take params and "map" a
-# function onto each vector with it with the function tree_map
+# function onto each vector within it with the function tree_map
 trace = tree_map(lambda p: jnp.zeros_like(p), init_params)
 
 # To add two such vectors, you need to do a
