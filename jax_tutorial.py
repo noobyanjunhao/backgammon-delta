@@ -202,6 +202,7 @@ rand_rewards = np.random.random(20)
 new_params, new_opt_state, loss = train_step( init_params, opt_state, test_planes, test_aux_features, rand_rewards)
 
 # Now after you spend hours training a network, you want to save it.
+# (Better yet, regularly save "checkpoints" along the way.)
 # The best tool for this for jax is orbax.
 
 import orbax.checkpoint as ocp
