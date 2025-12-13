@@ -4,6 +4,7 @@ from jax.tree_util import tree_map
 import optax
 import numpy as np
 import numba
+import orbax
 from flax import struct # Use for defining immutable state
 
 LEARNING_RATE = 1e-4
@@ -29,8 +30,8 @@ model = BackgammonValueNet()
 # vector shapes. So model.init() infers them from the provided inputs.
 # Here we generate a batch of 10 inputs with zeros.
 
-dummy_planes= jnp.zeros( (10, BOARD_LENGTH, CONV_INPUT_CHANNELS) )
-dummy_aux_features = jnp.zeros( (10, AUX_INPUT_SIZE) )
+dummy_planes= jnp.zeros( (32, BOARD_LENGTH, CONV_INPUT_CHANNELS) )
+dummy_aux_features = jnp.zeros( (32, AUX_INPUT_SIZE) )
 rng_key = jax.random.key(0)
 
 init_variables = model.init(
@@ -137,13 +138,13 @@ opt_state = optimizer.init(init_params)
 # To train the network, you define a loss function L (here is a
 # simplified version where you are passing in a vector of targets
 
-def loss_fn(params, state_planes, aux_features, reward_target):
+def loss_fn(params, state_planes, aux_features, reward_targets):
     # 1. Apply the model with current parameters
     # The agent's model needs to be accessible in this scope
     V_pred = model.apply({'params': params}, state_planes, aux_features)
     
     # 2. Calculate the Mean Squared Error (MSE) loss
-    td_error = reward_target_batch - V_pred
+    td_error = reward_targets - V_pred
     loss = jnp.mean(jnp.square(td_error))
     
     return loss
@@ -171,9 +172,9 @@ def train_step(params, opt_state, state_planes, aux_features, reward_targets):
     # The output is a tuple: (scalar_loss, gradients_pytree)
     (loss_value, gradients_pytree) = jax.value_and_grad(loss_fn)(
         params, 
-        state_planes_batch,
-        aux_features_batch,
-        reward_target_batch
+        state_planes,
+        aux_features,
+        reward_targets
     )
     
     # 2. Compute Updates (Step 1 of Optax)
@@ -193,6 +194,39 @@ def train_step(params, opt_state, state_planes, aux_features, reward_targets):
     
     # Return the new state and the loss value (for logging)
     return new_params, new_opt_state, loss_value
+
+# Let's do a training update with reward targets
+
+rand_rewards = np.random.random(20)
+
+new_params, new_opt_state, loss = train_step( init_params, opt_state, test_planes, test_aux_features, rand_rewards)
+
+# Now after you spend hours training a network, you want to save it.
+# The best tool for this for jax is orbax.
+
+import orbax.checkpoint as ocp
+import os
+import pathlib
+
+# Orbax insists that this path be absolute
+CHECKPOINT_ROOT = '/tmp/my_checkpoints'
+path = pathlib.Path(CHECKPOINT_ROOT)
+os.makedirs(path, exist_ok=True)
+
+# path = ocp.test_utils.erase_and_create_empty('/tmp/my_checkpoints/')
+
+checkpointer = ocp.StandardCheckpointer()
+
+# By default Orbax will not overwrite existing data, force=True tells it to overwrite
+checkpointer.save(path / 'new_params', new_params, force=True)
+
+restored_params = checkpointer.restore(
+    path / 'new_params/' )
+
+print(restored_params)
+
+# Orbax writes are asynchronous, close to make sure all writing finishes
+checkpointer.close() 
 
 
 # To create a vector of the "same shape" as params (a nested pytree
