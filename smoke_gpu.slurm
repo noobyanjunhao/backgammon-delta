@@ -22,9 +22,19 @@ echo "Available CUDA modules:"
 module avail cuda 2>&1 | grep -E "cuda|^--" | head -10 || true
 
 # Set CUDA library paths (cudatoolkit is already loaded)
-export CUDA_ROOT=/opt/cray/pe/cuda/12.8
-export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
-echo "CUDA paths set: CUDA_ROOT=$CUDA_ROOT"
+# Try to find CUDA path dynamically
+if command -v nvcc &> /dev/null; then
+    CUDA_ROOT=$(dirname $(dirname $(which nvcc)))
+    export CUDA_ROOT
+    export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
+    echo "CUDA paths set: CUDA_ROOT=$CUDA_ROOT"
+elif [ -d "/opt/cray/pe/cuda" ]; then
+    export CUDA_ROOT=/opt/cray/pe/cuda/12.8
+    export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
+    echo "CUDA paths set (default): CUDA_ROOT=$CUDA_ROOT"
+else
+    echo "Warning: Could not find CUDA installation"
+fi
 
 # Use system Python3 (should be available by default)
 echo "Python version:"
