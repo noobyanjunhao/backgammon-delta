@@ -21,6 +21,11 @@ module list | grep -i cuda || echo "No CUDA modules loaded"
 echo "Available CUDA modules:"
 module avail cuda 2>&1 | grep -E "cuda|^--" | head -10 || true
 
+# Set CUDA library paths (cudatoolkit is already loaded)
+export CUDA_ROOT=/opt/cray/pe/cuda/12.8
+export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
+echo "CUDA paths set: CUDA_ROOT=$CUDA_ROOT"
+
 # Use system Python3 (should be available by default)
 echo "Python version:"
 python3 --version
