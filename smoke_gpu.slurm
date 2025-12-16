@@ -15,8 +15,9 @@ set -euo pipefail
 echo "Running on $(hostname)"
 nvidia-smi || true
 
-module load anaconda3_gpu
-module list
+# Use system Python3 (should be available by default)
+echo "Python version:"
+python3 --version
 
 # (1) Create env once interactively, OR do it here for a first smoke test:
 python3 -m venv .venv
