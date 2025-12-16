@@ -1,11 +1,13 @@
 # smoke_jax_gpu.py
 import os
-import jax
-import jax.numpy as jnp
-
-# Set JAX to preallocate GPU memory to avoid issues
+# Configure JAX for better GPU compatibility
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
+# Disable parallel compilation to avoid CUDA version mismatch issues
+os.environ['XLA_FLAGS'] = '--xla_gpu_force_compilation_parallelism=1'
+
+import jax
+import jax.numpy as jnp
 
 from backgammon_value_net import BackgammonValueNet, BOARD_LENGTH, CONV_INPUT_CHANNELS, AUX_INPUT_SIZE
 

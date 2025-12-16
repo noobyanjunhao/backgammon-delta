@@ -24,8 +24,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 
-# JAX GPU install is the only "tricky" part; if this fails, fall back to CPU smoke first.
-pip install -U "jax[cuda12]" "flax" "optax"
+# JAX GPU install - try CUDA 11 first for better driver compatibility
+# The driver is CUDA 12.8, but JAX CUDA 12.9 causes segfaults
+# CUDA 11 should work with forward compatibility
+echo "Installing JAX with CUDA 11 (better compatibility with CUDA 12.8 driver)..."
+pip install -U "jax[cuda11_local]" "flax" "optax" || {
+    echo "CUDA 11 install failed, trying CUDA 12..."
+    pip install -U "jax[cuda12]" "flax" "optax"
+}
 
 # Try GPU version first
 echo "Attempting GPU test..."
