@@ -22,12 +22,20 @@ echo "Available CUDA modules:"
 module avail cuda 2>&1 | grep -E "cuda|^--" | head -10 || true
 
 # Set CUDA library paths (cudatoolkit is already loaded)
-# Try to find CUDA path dynamically
+# Try to find CUDA path dynamically and add cuDNN paths
 if command -v nvcc &> /dev/null; then
     CUDA_ROOT=$(dirname $(dirname $(which nvcc)))
     export CUDA_ROOT
+    # Add CUDA lib64 and common cuDNN locations
     export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
+    # Try common cuDNN locations
+    for cudnn_path in ${CUDA_ROOT}/lib64 ${CUDA_ROOT}/targets/x86_64-linux/lib /usr/local/cuda/lib64; do
+        if [ -d "$cudnn_path" ]; then
+            export LD_LIBRARY_PATH=${cudnn_path}:${LD_LIBRARY_PATH}
+        fi
+    done
     echo "CUDA paths set: CUDA_ROOT=$CUDA_ROOT"
+    echo "LD_LIBRARY_PATH includes: $(echo $LD_LIBRARY_PATH | tr ':' '\n' | head -5)"
 elif [ -d "/opt/cray/pe/cuda" ]; then
     export CUDA_ROOT=/opt/cray/pe/cuda/12.8
     export LD_LIBRARY_PATH=${CUDA_ROOT}/lib64:${LD_LIBRARY_PATH:-}
@@ -54,13 +62,14 @@ nvidia-smi --query-gpu=driver_version --format=csv,noheader || true
 echo "Installing compatible NumPy version..."
 pip install "numpy<2.0"
 
-# JAX GPU install - The driver is CUDA 12.8, JAX CUDA 12.9 has version mismatch
-# Try older JAX version that might be more compatible, with compatible NumPy
-echo "Installing JAX 0.4.23 with compatible NumPy..."
-pip install "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax" || {
-    echo "JAX 0.4.23 failed, trying latest with NumPy 2.x..."
-    pip install -U "numpy>=2.0"
-    pip install -U "jax[cuda12]" "flax" "optax"
+# JAX GPU install - Try latest JAX first (better cuDNN handling)
+# Latest JAX has better cuDNN initialization and error handling
+echo "Installing latest JAX (better cuDNN support)..."
+pip install -U "numpy>=2.0"
+pip install -U "jax[cuda12]" "flax" "optax" || {
+    echo "Latest JAX failed, trying JAX 0.4.23 with NumPy < 2.0..."
+    pip install "numpy<2.0"
+    pip install "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax"
 }
 
 # Try GPU version first

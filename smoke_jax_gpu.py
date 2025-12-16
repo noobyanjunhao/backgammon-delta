@@ -5,6 +5,10 @@ os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
 # Disable parallel compilation to avoid CUDA version mismatch issues
 os.environ['XLA_FLAGS'] = '--xla_gpu_force_compilation_parallelism=1'
+# Try to work around cuDNN issues
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+# Allow JAX to use system cuDNN if available
+os.environ['JAX_PLATFORM_NAME'] = 'gpu'
 
 import jax
 import jax.numpy as jnp
