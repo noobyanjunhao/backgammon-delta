@@ -62,14 +62,17 @@ nvidia-smi --query-gpu=driver_version --format=csv,noheader || true
 echo "Installing compatible NumPy version..."
 pip install "numpy<2.0"
 
-# JAX GPU install - Try latest JAX first (better cuDNN handling)
-# Latest JAX has better cuDNN initialization and error handling
-echo "Installing latest JAX (better cuDNN support)..."
+# JAX GPU install - Try CUDA 11 first (better forward compatibility with CUDA 12.8 driver)
+# CUDA 11 should be forward compatible and avoid the 12.8/12.9 mismatch segfault
+echo "Trying JAX with CUDA 11 (forward compatible with CUDA 12.8 driver)..."
 pip install -U "numpy>=2.0"
-pip install -U "jax[cuda12]" "flax" "optax" || {
-    echo "Latest JAX failed, trying JAX 0.4.23 with NumPy < 2.0..."
-    pip install "numpy<2.0"
-    pip install "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax"
+pip install -U "jax[cuda11_local]" "flax" "optax" || {
+    echo "CUDA 11 failed, trying latest CUDA 12..."
+    pip install -U "jax[cuda12]" "flax" "optax" || {
+        echo "CUDA 12 failed, trying JAX 0.4.23 with NumPy < 2.0..."
+        pip install "numpy<2.0"
+        pip install "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax"
+    }
 }
 
 # Try GPU version first
