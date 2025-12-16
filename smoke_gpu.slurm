@@ -21,14 +21,33 @@ module list | grep -i cuda || echo "No CUDA modules loaded"
 echo "Available CUDA modules:"
 module avail cuda 2>&1 | grep -E "cuda|^--" | head -10 || true
 
-# Try to use cuda/12.8 module if cudatoolkit is causing issues
+# Option A: Unload cudatoolkit and use cuda/12.8 module (recommended)
 echo ""
-echo "Attempting to configure CUDA modules for compatibility..."
+echo "=== Configuring CUDA Modules (Option A) ==="
 if module list 2>&1 | grep -q "cudatoolkit"; then
-    echo "cudatoolkit is loaded. Trying to switch to cuda/12.8 module..."
-    module unload cudatoolkit 2>/dev/null || true
-    module load cuda/12.8 2>/dev/null || echo "Could not load cuda/12.8, continuing with current setup"
+    echo "Found cudatoolkit loaded. Unloading it..."
+    module unload cudatoolkit 2>/dev/null || {
+        echo "Warning: Could not unload cudatoolkit (may be required by other modules)"
+    }
 fi
+
+# Try to load cuda/12.8 module
+echo "Loading cuda/12.8 module..."
+module load cuda/12.8 2>/dev/null && {
+    echo "✓ Successfully loaded cuda/12.8"
+    module list | grep -i cuda
+} || {
+    echo "⚠ Could not load cuda/12.8 (may not be available or conflicts)"
+    echo "Continuing with current CUDA setup..."
+}
+
+# Set CUDA environment variables from module if loaded
+if [ -n "${CUDA_HOME:-}" ]; then
+    export CUDA_ROOT=$CUDA_HOME
+    export CUDA_PATH=$CUDA_HOME
+    echo "✓ Using CUDA_HOME from module: $CUDA_HOME"
+fi
+echo ""
 
 # Set CUDA library paths - try multiple methods
 echo "=== Setting CUDA Library Paths ==="
