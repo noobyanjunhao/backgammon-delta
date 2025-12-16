@@ -24,13 +24,21 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 
-# JAX GPU install - try CUDA 11 first for better driver compatibility
-# The driver is CUDA 12.8, but JAX CUDA 12.9 causes segfaults
-# CUDA 11 should work with forward compatibility
-echo "Installing JAX with CUDA 11 (better compatibility with CUDA 12.8 driver)..."
-pip install -U "jax[cuda11_local]" "flax" "optax" || {
-    echo "CUDA 11 install failed, trying CUDA 12..."
-    pip install -U "jax[cuda12]" "flax" "optax"
+# Check CUDA version
+echo "Checking CUDA version..."
+nvcc --version 2>/dev/null || echo "nvcc not in PATH"
+nvidia-smi --query-gpu=driver_version --format=csv,noheader || true
+
+# JAX GPU install - The driver is CUDA 12.8, JAX CUDA 12.9 has version mismatch
+# Try installing without the CUDA extra first, then add CUDA support
+echo "Installing JAX base packages..."
+pip install -U "jax" "flax" "optax"
+
+# Try to install CUDA plugin that matches driver version
+# CUDA 12.8 driver should work with JAX CUDA 12.x, but we need to handle the mismatch
+echo "Installing JAX CUDA plugin..."
+pip install -U "jax-cuda12-plugin" || {
+    echo "CUDA plugin install failed, will use CPU or try alternative..."
 }
 
 # Try GPU version first
