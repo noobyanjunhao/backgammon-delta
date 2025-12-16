@@ -58,33 +58,21 @@ echo "Installing JAX with CUDA 12 support..."
 pip install -U --no-cache-dir "jax[cuda12]" flax optax numba
 
 echo ""
-echo "Verifying CUDA libraries are accessible..."
-python -c "import os; print('CUDA_HOME:', os.environ.get('CUDA_HOME', 'Not set')); print('LD_LIBRARY_PATH (first 3):', ':'.join(os.environ.get('LD_LIBRARY_PATH', '').split(':')[:3]))"
-
-echo ""
 echo "=== Testing Installation ==="
-# Check CUDA library paths
-echo "CUDA environment check:"
+# KEY: Unset CUDA paths before importing JAX to let it use bundled libraries
 python << 'EOF'
 import os
-print("CUDA_HOME:", os.environ.get('CUDA_HOME', 'Not set'))
-print("LD_LIBRARY_PATH:", os.environ.get('LD_LIBRARY_PATH', 'Not set')[:200] if os.environ.get('LD_LIBRARY_PATH') else 'Not set')
-# Check for cuSPARSE library
-import ctypes
-import sys
-lib_paths = os.environ.get('LD_LIBRARY_PATH', '').split(':')
-lib_paths.extend(['/usr/lib64', '/lib64', '/opt/cray/pe/cuda/12.8/lib64'])
-for path in lib_paths:
-    if path and os.path.exists(path):
-        cusparse = os.path.join(path, 'libcusparse.so')
-        if os.path.exists(cusparse):
-            print(f"Found cuSPARSE at: {cusparse}")
-            break
-else:
-    print("cuSPARSE library not found in LD_LIBRARY_PATH")
-EOF
+# Unset CUDA paths - JAX uses its bundled CUDA libraries
+for key in ['LD_LIBRARY_PATH', 'CUDA_HOME', 'CUDA_ROOT', 'CUDA_PATH']:
+    if key in os.environ:
+        del os.environ[key]
 
-python -c "import jax; print('JAX version:', jax.__version__); print('Devices:', jax.devices())"
+import jax
+import jax.numpy as jnp
+print("JAX version:", jax.__version__)
+print("Devices:", jax.devices())
+print("Default backend:", jax.default_backend())
+EOF
 
 # Copy smoke test to env directory
 if [ -f "${SLURM_SUBMIT_DIR:-$HOME/backgammon-delta}/smoke_jax_gpu_min.py" ]; then
