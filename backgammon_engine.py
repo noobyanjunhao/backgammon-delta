@@ -203,7 +203,7 @@ def _reward(state, player):
                 if state[p] < 0:
                     return 3*player
             return 2*player
-    if state[B_OFF] == NUM_CHECKERS:
+    if state[B_OFF] == -NUM_CHECKERS:
         # black has won
         if state[W_OFF] > 0:
             return -player
