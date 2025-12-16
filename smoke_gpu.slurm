@@ -30,15 +30,11 @@ nvcc --version 2>/dev/null || echo "nvcc not in PATH"
 nvidia-smi --query-gpu=driver_version --format=csv,noheader || true
 
 # JAX GPU install - The driver is CUDA 12.8, JAX CUDA 12.9 has version mismatch
-# Try installing without the CUDA extra first, then add CUDA support
-echo "Installing JAX base packages..."
-pip install -U "jax" "flax" "optax"
-
-# Try to install CUDA plugin that matches driver version
-# CUDA 12.8 driver should work with JAX CUDA 12.x, but we need to handle the mismatch
-echo "Installing JAX CUDA plugin..."
-pip install -U "jax-cuda12-plugin" || {
-    echo "CUDA plugin install failed, will use CPU or try alternative..."
+# Try older JAX version that might be more compatible
+echo "Trying JAX 0.4.23 (better CUDA 12.8 compatibility)..."
+pip install -U "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax" || {
+    echo "Older version failed, trying latest..."
+    pip install -U "jax[cuda12]" "flax" "optax"
 }
 
 # Try GPU version first
