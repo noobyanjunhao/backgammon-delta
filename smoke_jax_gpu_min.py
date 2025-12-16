@@ -10,6 +10,6 @@ print("Default backend:", jax.default_backend())
 x = jnp.ones((4096, 4096), dtype=jnp.float32)
 y = x @ x
 y.block_until_ready()
-print("OK, matmul done on:", y.device())
+print("OK, matmul done on:", y.device)  # device is a property, not a function
 print("Result shape:", y.shape, "sum:", float(jnp.sum(y)))
 
