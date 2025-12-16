@@ -1,7 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=bg_smoke
+#SBATCH --job-name=bg_smoke_old
 #SBATCH --account=bfxm-delta-gpu
 #SBATCH --partition=gpuA100x4-interactive
+# NOTE: This is the OLD script that builds env in job. Use bg_smoke.slurm instead.
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
