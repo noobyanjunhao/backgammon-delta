@@ -27,5 +27,10 @@ pip install -U pip
 # JAX GPU install is the only "tricky" part; if this fails, fall back to CPU smoke first.
 pip install -U "jax[cuda12]" "flax" "optax"
 
-python smoke_jax_gpu.py
+# Try GPU version first
+echo "Attempting GPU test..."
+python smoke_jax_gpu.py || {
+    echo "GPU test failed, trying CPU fallback..."
+    python smoke_jax_cpu.py
+}
 
