@@ -9,7 +9,7 @@ BOARD_LENGTH = 24
 CONV_INPUT_CHANNELS = 15
 AUX_INPUT_SIZE = 6 # 5 Aux + 1 Cube
 FILTERS = 128
-NUM_RESIDUAL_BLOCKS = 6
+NUM_RESIDUAL_BLOCKS = 9
 
 # --- 1D ResNet V2 Residual Block (Pre-activation) ---
 class ResidualBlockV2(nn.Module):
