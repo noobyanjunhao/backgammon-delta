@@ -8,19 +8,14 @@ echo "=== Building JAX GPU Environment ==="
 echo "This should be run in an interactive GPU session (srun)"
 echo ""
 
-# Reset modules and load Python + CUDA
+# Reset modules and load Python ONLY
+# DO NOT load CUDA modules - JAX uses its bundled CUDA libraries
 module reset
 
-# Load CUDA module first (needed for cuSPARSE and other CUDA libraries)
-module load cuda/12.8 2>/dev/null || {
-    echo "Warning: cuda/12.8 not found, trying cudatoolkit..."
-    module load cudatoolkit 2>/dev/null || echo "No CUDA module found"
-}
-
-# Load Python
-module load anaconda3_gpu 2>/dev/null || {
-    echo "Warning: anaconda3_gpu not found, trying alternatives..."
-    module load python 2>/dev/null || module load python/3.11 2>/dev/null || echo "Using system Python"
+# Load Python module only
+module load python 2>/dev/null || {
+    echo "Warning: python module not found, trying alternatives..."
+    module load python/3.11 2>/dev/null || module load anaconda3_gpu 2>/dev/null || echo "Using system Python"
 }
 module list
 
@@ -68,6 +63,27 @@ python -c "import os; print('CUDA_HOME:', os.environ.get('CUDA_HOME', 'Not set')
 
 echo ""
 echo "=== Testing Installation ==="
+# Check CUDA library paths
+echo "CUDA environment check:"
+python << 'EOF'
+import os
+print("CUDA_HOME:", os.environ.get('CUDA_HOME', 'Not set'))
+print("LD_LIBRARY_PATH:", os.environ.get('LD_LIBRARY_PATH', 'Not set')[:200] if os.environ.get('LD_LIBRARY_PATH') else 'Not set')
+# Check for cuSPARSE library
+import ctypes
+import sys
+lib_paths = os.environ.get('LD_LIBRARY_PATH', '').split(':')
+lib_paths.extend(['/usr/lib64', '/lib64', '/opt/cray/pe/cuda/12.8/lib64'])
+for path in lib_paths:
+    if path and os.path.exists(path):
+        cusparse = os.path.join(path, 'libcusparse.so')
+        if os.path.exists(cusparse):
+            print(f"Found cuSPARSE at: {cusparse}")
+            break
+else:
+    print("cuSPARSE library not found in LD_LIBRARY_PATH")
+EOF
+
 python -c "import jax; print('JAX version:', jax.__version__); print('Devices:', jax.devices())"
 
 # Copy smoke test to env directory
