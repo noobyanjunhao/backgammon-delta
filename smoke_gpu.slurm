@@ -15,6 +15,12 @@ set -euo pipefail
 echo "Running on $(hostname)"
 nvidia-smi || true
 
+# Check and use system CUDA modules
+echo "Checking CUDA modules..."
+module list | grep -i cuda || echo "No CUDA modules loaded"
+echo "Available CUDA modules:"
+module avail cuda 2>&1 | grep -E "cuda|^--" | head -10 || true
+
 # Use system Python3 (should be available by default)
 echo "Python version:"
 python3 --version
@@ -29,11 +35,16 @@ echo "Checking CUDA version..."
 nvcc --version 2>/dev/null || echo "nvcc not in PATH"
 nvidia-smi --query-gpu=driver_version --format=csv,noheader || true
 
+# Install compatible NumPy first (JAX 0.4.23 needs NumPy < 2.0)
+echo "Installing compatible NumPy version..."
+pip install "numpy<2.0"
+
 # JAX GPU install - The driver is CUDA 12.8, JAX CUDA 12.9 has version mismatch
-# Try older JAX version that might be more compatible
-echo "Trying JAX 0.4.23 (better CUDA 12.8 compatibility)..."
-pip install -U "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax" || {
-    echo "Older version failed, trying latest..."
+# Try older JAX version that might be more compatible, with compatible NumPy
+echo "Installing JAX 0.4.23 with compatible NumPy..."
+pip install "jax[cuda12]==0.4.23" "jaxlib==0.4.23" "flax" "optax" || {
+    echo "JAX 0.4.23 failed, trying latest with NumPy 2.x..."
+    pip install -U "numpy>=2.0"
     pip install -U "jax[cuda12]" "flax" "optax"
 }
 
