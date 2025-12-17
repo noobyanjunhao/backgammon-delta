@@ -85,7 +85,8 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
     def pick_action(state, player):
         # roll dice + enumerate legal afterstates
         dice = np.random.randint(1, 7, size=(2,), dtype=np.int8)
-        afterstates, _paths = _actions(state, dice, player)
+        # _actions expects (state, current_player, dice)
+        afterstates, _paths = _actions(state, player, dice)
         if len(afterstates) == 0:
             return 0, state  # no-op fallback
         # epsilon-greedy: random action sometimes
