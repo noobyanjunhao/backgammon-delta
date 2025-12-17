@@ -446,7 +446,8 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
     print("done")
 
     # Save final value network parameters
-    ckpt_dir = "checkpoints"
+    # Orbax requires absolute paths
+    ckpt_dir = os.path.abspath("checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
     ckpt_path = checkpoints.save_checkpoint(
         ckpt_dir=ckpt_dir,
