@@ -60,8 +60,13 @@ def encode(state, player):
 
 @jax.jit
 def v_apply(params, board, aux):
-    # board: (B, 24, 15) or (B, 24*15); aux: (B, AUX_INPUT_SIZE)
-    return ValueNet().apply({"params": params}, board, aux).squeeze(-1)
+    # board: (B, 24, 15); aux: (B, AUX_INPUT_SIZE)
+    # Call the module with explicit keyword arguments to match __call__ signature.
+    return ValueNet().apply(
+        {"params": params},
+        board_state=board,
+        aux_features=aux,
+    ).squeeze(-1)
 
 
 @jax.jit
@@ -102,7 +107,8 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         # epsilon-greedy: random action sometimes
         if np.random.rand() < eps_greedy:
             ns = afterstates[np.random.randint(len(afterstates))]
-            r = _reward(ns, player)
+            # ensure plain numpy types for numba-jitted _reward
+            r = _reward(np.asarray(ns, dtype=np.int8), np.int8(player))
             return r, ns
         # greedy by value of afterstate from next player's perspective (zero-sum)
         boards = []
@@ -115,7 +121,8 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         vals = v_apply(st.params, boards, auxs)
         best = int(jnp.argmin(vals))  # minimize opponent's value
         ns = afterstates[best]
-        r = _reward(ns, player)
+        # ensure plain numpy types for numba-jitted _reward
+        r = _reward(np.asarray(ns, dtype=np.int8), np.int8(player))
         return r, ns
 
     t0 = time.time()
