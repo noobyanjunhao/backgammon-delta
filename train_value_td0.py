@@ -7,7 +7,6 @@ from flax.training import train_state
 
 from backgammon_engine import (
     _new_game,
-    _actions,
     _to_canonical,
     NUM_CHECKERS,
     HOME_BOARD_SIZE,
@@ -71,6 +70,223 @@ def py_reward(state, player):
             return -2 * p
 
     return 0
+
+
+def can_bear_off_py(state, player):
+    """Pure Python version of _can_bear_off."""
+    s = np.asarray(state, dtype=np.int8)
+    bar_index = W_BAR if player == 1 else B_BAR
+    if s[bar_index] * player > 0:
+        return False
+    # White's home board: points 19-24 (indices 19-24)
+    if player == 1:
+        for i in range(1, int(NUM_POINTS) - int(HOME_BOARD_SIZE) + 1):
+            if s[i] > 0:
+                return False
+    else:
+        # Black's home board: points 1-6 (indices 1-6)
+        for i in range(int(HOME_BOARD_SIZE) + 1, int(NUM_POINTS) + 1):
+            if s[i] < 0:
+                return False
+    return True
+
+
+def get_target_index_py(start_index, roll, player):
+    """Pure Python version of _get_target_index."""
+    target = int(start_index + roll * player)
+    if 1 <= target <= int(NUM_POINTS):
+        return target
+    if target <= 0:
+        return int(B_OFF)
+    return int(W_OFF)
+
+
+def is_move_legal_py(state, player, from_point, to_point):
+    """Pure Python version of _is_move_legal."""
+    s = np.asarray(state, dtype=np.int8)
+    p = int(player)
+    from_point = int(from_point)
+    to_point = int(to_point)
+
+    # Rule 1: Cannot move from an empty point
+    if s[from_point] * p <= 0:
+        return False
+
+    # Rule 2: Cannot move if pieces are on the bar unless the move starts at the bar
+    bar_index = W_BAR if p == 1 else B_BAR
+    if s[bar_index] * p > 0 and from_point != bar_index:
+        return False
+
+    # Rule 3: Target point must not be blocked by the opponent
+    if 1 <= to_point <= int(NUM_POINTS):
+        target_checkers = s[to_point] * p
+        if target_checkers <= -2:
+            return False
+
+    # Rule 4: Bearing off rules
+    if to_point == W_OFF or to_point == B_OFF:
+        off_target = W_OFF if p == 1 else B_OFF
+        if to_point != off_target:
+            return False
+        if not can_bear_off_py(s, p):
+            return False
+        if p == 1:
+            for i in range(int(NUM_POINTS) - int(HOME_BOARD_SIZE) + 1, from_point):
+                if s[i] > 0:
+                    return False
+        else:
+            for i in range(from_point - 1, 0, -1):
+                if s[i] < 0:
+                    return False
+
+    return True
+
+
+def apply_sub_move_py(state, player, from_point, to_point):
+    """Pure Python version of _apply_sub_move."""
+    s = np.asarray(state, dtype=np.int8)
+    p = int(player)
+    from_point = int(from_point)
+    to_point = int(to_point)
+
+    if not is_move_legal_py(s, p, from_point, to_point):
+        return None
+
+    next_state = s.copy()
+    # Remove checker from source
+    next_state[from_point] -= p
+
+    # If bearing off
+    if to_point == W_OFF or to_point == B_OFF:
+        next_state[to_point] += p
+    # If not bearing off
+    elif 1 <= to_point <= int(NUM_POINTS):
+        # Is there an opponent blot? Move it to bar
+        if next_state[to_point] == -p:
+            opponent_bar_index = B_BAR if p == 1 else W_BAR
+            next_state[opponent_bar_index] -= p
+            next_state[to_point] = p
+        else:
+            next_state[to_point] += p
+    else:
+        return None
+
+    return next_state
+
+
+def find_moves_recursive_py(state, player, remaining_dice, current_move, all_moves, all_afterstates):
+    """
+    Pure Python version of _find_moves_recursive.
+    state: np.array int8 (28,)
+    remaining_dice: list of ints
+    current_move: list of (from_point, roll) tuples
+    all_moves: list of move-sequences
+    all_afterstates: list of resulting states
+    """
+    s = np.asarray(state, dtype=np.int8)
+    p = int(player)
+
+    # Base Case 1: All dice used
+    if len(remaining_dice) == 0:
+        all_moves.append(list(current_move))
+        all_afterstates.append(s.copy())
+        return
+
+    # Optimization: Only consider unique dice values for iteration
+    unique_dice = sorted(set(remaining_dice), reverse=True)
+
+    # Try to use the largest unique die first
+    for roll in unique_dice:
+        possible_moves = []
+
+        # If on bar, only consider moves from the bar
+        bar_index = W_BAR if p == 1 else B_BAR
+        if s[bar_index] * p > 0:
+            from_point = bar_index
+            to_point = get_target_index_py(from_point, roll, p)
+            if to_point >= 0 and is_move_legal_py(s, p, from_point, to_point):
+                possible_moves.append((from_point, to_point, roll))
+        else:
+            # If not on bar
+            for from_point in range(1, int(NUM_POINTS) + 1):
+                if s[from_point] * p > 0:
+                    to_point = get_target_index_py(from_point, roll, p)
+                    if is_move_legal_py(s, p, from_point, to_point):
+                        possible_moves.append((from_point, to_point, roll))
+
+        # Recurse on valid moves found
+        for from_point, to_point, r in possible_moves:
+            next_state = apply_sub_move_py(s, p, from_point, to_point)
+            if next_state is None:
+                continue
+            new_dice_list = list(remaining_dice)
+            try:
+                new_dice_list.remove(r)
+            except Exception:
+                continue
+            new_move = list(current_move)
+            new_move.append((from_point, int(r)))
+            find_moves_recursive_py(next_state, p, new_dice_list, new_move, all_moves, all_afterstates)
+
+    if current_move:
+        all_moves.append(list(current_move))
+        all_afterstates.append(s.copy())
+
+
+def actions_py(state, current_player, dice):
+    """
+    Pure Python version of _actions (no Numba).
+    Returns (moves, afterstates) as lists.
+    """
+    s = np.asarray(state, dtype=np.int8)
+    p = int(current_player)
+    all_moves = []
+    all_afterstates = []
+    current_move = []
+
+    dice_list = list(int(d) for d in dice)
+    if dice_list[0] == dice_list[1]:
+        dice_list = [dice_list[0]] * 4
+
+    find_moves_recursive_py(s, p, dice_list, current_move, all_moves, all_afterstates)
+
+    if not all_moves:
+        # Forced pass: only legal move is no-op
+        all_moves.append([])
+        all_afterstates.append(s.copy())
+        return all_moves, all_afterstates
+
+    # Player must use maximum number of dice possible
+    max_dice_used = max(len(m) for m in all_moves)
+    max_len_moves = []
+    max_len_afterstates = []
+    for m, a in zip(all_moves, all_afterstates):
+        if len(m) == max_dice_used:
+            max_len_moves.append(m)
+            max_len_afterstates.append(a)
+
+    if max_dice_used == len(dice_list):
+        return max_len_moves, max_len_afterstates
+
+    # Player must use maximum number of pips possible
+    total_pips = sum(dice_list)
+    max_pips_used = 0
+    for m in max_len_moves:
+        s_pips = sum(r for (_, r) in m)
+        if s_pips > max_pips_used:
+            max_pips_used = s_pips
+            if max_pips_used == total_pips:
+                break
+
+    max_pip_moves = []
+    max_pip_afterstates = []
+    for m, a in zip(max_len_moves, max_len_afterstates):
+        s_pips = sum(r for (_, r) in m)
+        if s_pips == max_pips_used:
+            max_pip_moves.append(m)
+            max_pip_afterstates.append(a)
+
+    return max_pip_moves, max_pip_afterstates
 
 
 def encode(state, player):
@@ -155,12 +371,9 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
     buf_board, buf_aux, buf_tgt = [], [], []
 
     def pick_action(state, player):
-        # roll dice + enumerate legal afterstates
+        # roll dice + enumerate legal afterstates (pure Python version)
         dice = np.random.randint(1, 7, size=(2,), dtype=np.int8)
-        # _actions is Numba-jitted; use its underlying Python implementation to avoid
-        # Numba typing issues on this environment.
-        # Signature: (state, current_player, dice)
-        afterstates, _paths = _actions.py_func(state, player, dice)
+        afterstates, _paths = actions_py(state, player, dice)
         if len(afterstates) == 0:
             return 0, state  # no-op fallback
         # epsilon-greedy: random action sometimes
