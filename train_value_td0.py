@@ -75,8 +75,9 @@ def py_reward(state, player):
 def can_bear_off_py(state, player):
     """Pure Python version of _can_bear_off."""
     s = np.asarray(state, dtype=np.int8)
-    bar_index = W_BAR if player == 1 else B_BAR
-    if s[bar_index] * player > 0:
+    bar_index = int(W_BAR if player == 1 else B_BAR)
+    # Ensure we compare scalar values, not arrays
+    if int(s[bar_index]) * int(player) > 0:
         return False
     # White's home board: points 19-24 (indices 19-24)
     if player == 1:
