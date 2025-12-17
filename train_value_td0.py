@@ -1,9 +1,10 @@
+import os
 import time
 import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
-from flax.training import train_state
+from flax.training import train_state, checkpoints
 
 from backgammon_engine import (
     _new_game,
@@ -443,6 +444,17 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
             print(f"step {it}/{steps}  last_loss={float(loss):.4f}  elapsed={dt:.1f}s")
 
     print("done")
+
+    # Save final value network parameters
+    ckpt_dir = "checkpoints"
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = checkpoints.save_checkpoint(
+        ckpt_dir=ckpt_dir,
+        target=st.params,
+        step=steps,
+        overwrite=True,
+    )
+    print(f"Saved final params to {ckpt_path}")
 
 if __name__ == "__main__":
     main()
