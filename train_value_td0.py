@@ -202,7 +202,8 @@ def find_moves_recursive_py(state, player, remaining_dice, current_move, all_mov
 
         # If on bar, only consider moves from the bar
         bar_index = W_BAR if p == 1 else B_BAR
-        if s[bar_index] * p > 0:
+        # Guard against malformed states that are too short
+        if int(bar_index) < s.size and s[int(bar_index)] * p > 0:
             from_point = bar_index
             to_point = get_target_index_py(from_point, roll, p)
             if to_point >= 0 and is_move_legal_py(s, p, from_point, to_point):
@@ -244,6 +245,14 @@ def actions_py(state, current_player, dice):
     all_moves = []
     all_afterstates = []
     current_move = []
+
+    # Defensive: if state is not a full backgammon board, treat as forced pass.
+    # Engine uses indices up to B_OFF (27), so require at least 28 entries.
+    min_state_size = int(B_OFF) + 1
+    if s.ndim != 1 or s.size < min_state_size:
+        all_moves.append([])
+        all_afterstates.append(s.copy())
+        return all_moves, all_afterstates
 
     dice_list = list(int(d) for d in dice)
     if dice_list[0] == dice_list[1]:
