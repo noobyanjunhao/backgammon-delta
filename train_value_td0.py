@@ -108,7 +108,8 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         return r, ns
 
     t0 = time.time()
-    state, player = _new_game()
+    # _new_game() returns (player, dice, state)
+    player, _dice, state = _new_game()
 
     for it in range(1, steps + 1):
         b, a = encode(state, player)
@@ -117,11 +118,16 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         if r != 0:
             tgt = float(r)
             buf_board.append(b); buf_aux.append(a); buf_tgt.append(tgt)
-            state, player = _new_game()
+            # start a fresh game
+            player, _dice, state = _new_game()
         else:
             # TD(0): target = -V(next_state, next_player)
             nb, na = encode(next_state, -player)
-            v_next = float(v_apply(st.params, jnp.asarray(nb), jnp.asarray(na)))
+            # encode returns single state (24, 15) and (AUX_INPUT_SIZE,)
+            # add batch dimension so v_apply sees shape (1, 24, 15) and (1, AUX_INPUT_SIZE)
+            nb_batch = jnp.asarray(nb)[None, ...]
+            na_batch = jnp.asarray(na)[None, ...]
+            v_next = float(v_apply(st.params, nb_batch, na_batch)[0])
             tgt = -v_next
             buf_board.append(b); buf_aux.append(a); buf_tgt.append(tgt)
             state, player = next_state, -player
