@@ -34,13 +34,11 @@ def encode(state, player):
     board = np.zeros((BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=np.float32)
     # Points 1..24 go to first channel, indices 0..23
     pts = s[1 : 1 + BOARD_LENGTH]
-    # Be defensive in case s has unexpected length; pad or truncate to BOARD_LENGTH
-    if pts.shape[0] != BOARD_LENGTH:
-        safe = np.zeros((BOARD_LENGTH,), dtype=np.float32)
-        n = min(BOARD_LENGTH, pts.shape[0])
-        safe[:n] = pts[:n]
-        pts = safe
-    board[:, 0] = pts / 15.0
+    # If for any reason pts is shorter/longer than BOARD_LENGTH, safely copy what we can.
+    if pts.shape[0] >= BOARD_LENGTH:
+        board[:, 0] = pts[:BOARD_LENGTH] / 15.0
+    else:
+        board[: pts.shape[0], 0] = pts / 15.0
 
     aux = np.zeros((AUX_INPUT_SIZE,), dtype=np.float32)
     # Very simple aux: bar and off counts (scaled), plus side-to-move
