@@ -33,6 +33,9 @@ def py_reward(state, player):
     player: +1 or -1
     """
     s = np.asarray(state, dtype=np.int8)
+    # If state does not have full length, treat as non-terminal
+    if s.shape[0] < 28:
+        return 0
     p = int(player)
 
     # White has borne off all checkers
