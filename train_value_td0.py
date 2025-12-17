@@ -30,6 +30,8 @@ def encode(state, player):
     state_arr = np.asarray(state, dtype=np.int8)
     player_int = np.int8(player)
     s = _to_canonical(state_arr, player_int).astype(np.float32)
+    # Flatten in case any unexpected extra dimensions creep in
+    s = np.asarray(s, dtype=np.float32).ravel()
 
     board = np.zeros((BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=np.float32)
     # Points 1..24 go to first channel, indices 0..23
@@ -42,14 +44,14 @@ def encode(state, player):
     # Very simple aux: bar and off counts (scaled), plus side-to-move
     # W_BAR = 0, B_BAR = 25, W_OFF = 26, B_OFF = 27 in engine
     aux[0] = 1.0  # side to move (always +1 in canonical)
-    if AUX_INPUT_SIZE > 1:
-        aux[1] = s[0] / 15.0   # bar
-    if AUX_INPUT_SIZE > 2:
-        aux[2] = s[25] / 15.0  # opponent bar (in canonical coords)
-    if AUX_INPUT_SIZE > 3:
-        aux[3] = s[26] / 15.0  # off
-    if AUX_INPUT_SIZE > 4:
-        aux[4] = s[27] / 15.0  # opponent off
+    if AUX_INPUT_SIZE > 1 and s.shape[0] > 0:
+        aux[1] = float(np.asarray(s[0]).ravel()[0]) / 15.0   # bar
+    if AUX_INPUT_SIZE > 2 and s.shape[0] > 25:
+        aux[2] = float(np.asarray(s[25]).ravel()[0]) / 15.0  # opponent bar (canonical coords)
+    if AUX_INPUT_SIZE > 3 and s.shape[0] > 26:
+        aux[3] = float(np.asarray(s[26]).ravel()[0]) / 15.0  # off
+    if AUX_INPUT_SIZE > 4 and s.shape[0] > 27:
+        aux[4] = float(np.asarray(s[27]).ravel()[0]) / 15.0  # opponent off
 
     return board, aux
 
