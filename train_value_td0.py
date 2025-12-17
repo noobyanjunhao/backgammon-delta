@@ -5,13 +5,69 @@ import jax.numpy as jnp
 import optax
 from flax.training import train_state
 
-from backgammon_engine import _new_game, _actions, _reward, _to_canonical
+from backgammon_engine import (
+    _new_game,
+    _actions,
+    _to_canonical,
+    NUM_CHECKERS,
+    HOME_BOARD_SIZE,
+    NUM_POINTS,
+    W_BAR,
+    B_BAR,
+    W_OFF,
+    B_OFF,
+)
 from backgammon_value_net import (
     BackgammonValueNet as ValueNet,
     BOARD_LENGTH,
     CONV_INPUT_CHANNELS,
     AUX_INPUT_SIZE,
 )
+
+
+def py_reward(state, player):
+    """
+    Pure Python / NumPy version of _reward to avoid Numba typing issues.
+
+    state: array-like of shape (28,), dtype int8
+    player: +1 or -1
+    """
+    s = np.asarray(state, dtype=np.int8)
+    p = int(player)
+
+    # White has borne off all checkers
+    if s[W_OFF] == NUM_CHECKERS:
+        # if the losing player has borne off at least one checker,
+        # he loses only one point
+        if s[B_OFF] < 0:
+            return p
+        else:
+            # if the loser has not borne off any of his checkers, he is
+            # gammoned and loses two points
+            #
+            # if the loser has not borne off any of his checkers and still has
+            # a checker on the bar or in the winner's home board, he is
+            # backgammoned and loses three points
+            if s[B_BAR] < 0:
+                return 3 * p
+            for pt in range(1, int(HOME_BOARD_SIZE) + 1):
+                if s[pt] < 0:
+                    return 3 * p
+            return 2 * p
+
+    # Black has borne off all checkers
+    if s[B_OFF] == -NUM_CHECKERS:
+        if s[W_OFF] > 0:
+            return -p
+        else:
+            if s[W_BAR] > 0:
+                return -3 * p
+            for pt in range(3 * int(HOME_BOARD_SIZE) + 1, int(NUM_POINTS) + 1):
+                if s[pt] > 0:
+                    return -3 * p
+            return -2 * p
+
+    return 0
 
 
 def encode(state, player):
@@ -105,8 +161,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         # epsilon-greedy: random action sometimes
         if np.random.rand() < eps_greedy:
             ns = afterstates[np.random.randint(len(afterstates))]
-            # ensure plain numpy types for numba-jitted _reward
-            r = _reward(np.asarray(ns, dtype=np.int8), np.int8(player))
+            r = py_reward(ns, player)
             return r, ns
         # greedy by value of afterstate from next player's perspective (zero-sum)
         boards = []
@@ -119,8 +174,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         vals = v_apply(st.params, boards, auxs)
         best = int(jnp.argmin(vals))  # minimize opponent's value
         ns = afterstates[best]
-        # ensure plain numpy types for numba-jitted _reward
-        r = _reward(np.asarray(ns, dtype=np.int8), np.int8(player))
+        r = py_reward(ns, player)
         return r, ns
 
     t0 = time.time()
