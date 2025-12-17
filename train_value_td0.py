@@ -26,7 +26,10 @@ def encode(state, player):
     You should replace this with a richer encoding later.
     """
     # canonicalize so the net always sees "current player as white"
-    s = _to_canonical(state, player).astype(np.float32)
+    # Ensure types are plain numpy for numba-jitted _to_canonical
+    state_arr = np.asarray(state, dtype=np.int8)
+    player_int = np.int8(player)
+    s = _to_canonical(state_arr, player_int).astype(np.float32)
 
     board = np.zeros((BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=np.float32)
     # Points 1..24 go to first channel, indices 0..23
