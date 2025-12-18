@@ -93,10 +93,36 @@ DICE21, PROBS21 = dice21()
 # -----------------------------
 def encode_agent2(state, player):
     s = np.asarray(state, dtype=np.int8)
+    
+    # Defensive: if state is not a full backgammon board, return zeros
+    # Engine uses indices up to B_OFF (27), so require at least 28 entries
+    min_state_size = int(B_OFF) + 1
+    if s.ndim != 1 or s.size < min_state_size:
+        board = np.zeros((24, 15), dtype=np.float32)
+        aux = np.zeros((AUX_INPUT_SIZE,), dtype=np.float32)
+        return board, aux
+    
     # canonicalize so current player is "self" (white-positive)
     c = _to_canonical(s, np.int8(player)).astype(np.int16)
+    
+    # Flatten in case any unexpected extra dimensions creep in
+    c = np.asarray(c, dtype=np.int16).ravel()
+    
+    # Ensure we have enough elements (need at least 28: 0-27)
+    if c.shape[0] < min_state_size:
+        board = np.zeros((24, 15), dtype=np.float32)
+        aux = np.zeros((AUX_INPUT_SIZE,), dtype=np.float32)
+        return board, aux
 
     pts = c[1:25]  # 24 points
+    # Ensure pts is a proper array with 24 elements
+    if pts.shape[0] != 24:
+        # Pad or truncate to 24 if needed
+        if pts.shape[0] < 24:
+            pts = np.pad(pts, (0, 24 - pts.shape[0]), mode='constant')
+        else:
+            pts = pts[:24]
+    
     self_cnt = np.clip(pts, 0, 15)
     opp_cnt = np.clip(-pts, 0, 15)
 
@@ -129,10 +155,11 @@ def encode_agent2(state, player):
     #   off (self) is c[26]
     #   off (opp) is c[27]
     aux = np.zeros((AUX_INPUT_SIZE,), dtype=np.float32)
-    self_bar = float(max(c[0], 0))
-    opp_bar = float(max(c[25], 0))
-    self_off = float(max(c[26], 0))
-    opp_off = float(max(c[27], 0))
+    # Defensive: check bounds before accessing
+    self_bar = float(max(c[0] if c.shape[0] > 0 else 0, 0))
+    opp_bar = float(max(c[25] if c.shape[0] > 25 else 0, 0))
+    self_off = float(max(c[26] if c.shape[0] > 26 else 0, 0))
+    opp_off = float(max(c[27] if c.shape[0] > 27 else 0, 0))
 
     aux[0] = 1.0 if self_bar > 0 else 0.0
     aux[1] = self_bar / 15.0
