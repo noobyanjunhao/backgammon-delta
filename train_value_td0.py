@@ -1,11 +1,11 @@
 import os
-import os
 # Set JAX memory settings BEFORE importing jax to avoid OOM errors
 os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'  # Use only 70% of GPU memory
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Don't preallocate all memory
 os.environ['XLA_FLAGS'] = '--xla_gpu_enable_command_buffer='  # Disable CUDA graphs if needed
 
 import time
+import argparse
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -348,11 +348,14 @@ def encode(state, player):
     return board, aux
 
 
+# Create module instance once outside JIT to avoid reinitialization issues
+_value_net = ValueNet()
+
 @jax.jit
 def v_apply(params, board, aux):
     # board: (B, 24, 15); aux: (B, AUX_INPUT_SIZE)
     # Call the module with explicit keyword arguments to match __call__ signature.
-    return ValueNet().apply(
+    return _value_net.apply(
         {"params": params},
         board_state=board,
         aux_features=aux,
@@ -371,8 +374,20 @@ def loss_and_grads(params, board, aux, target):
     return loss, grads
 
 
-def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
-    key = jax.random.PRNGKey(seed)
+def main():
+    ap = argparse.ArgumentParser(description="TD(0) training with variable step sizes")
+    ap.add_argument("--steps", type=int, default=5000, help="Number of training steps (default: 5000)")
+    ap.add_argument("--lr", type=float, default=3e-4, help="Learning rate (default: 3e-4)")
+    ap.add_argument("--eps_greedy", type=float, default=0.10, help="Epsilon for epsilon-greedy exploration (default: 0.10)")
+    ap.add_argument("--batch", type=int, default=256, help="Batch size for training (default: 256)")
+    ap.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
+    ap.add_argument("--log_every", type=int, default=500, help="Print progress every N steps (default: 500)")
+    ap.add_argument("--save_every", type=int, default=None, help="Save checkpoint every N steps (default: None, only save at end)")
+    ap.add_argument("--ckpt_dir", type=str, default="checkpoints_td0", help="Checkpoint directory (default: checkpoints_td0)")
+    args = ap.parse_args()
+
+    key = jax.random.PRNGKey(args.seed)
+    np.random.seed(args.seed)
 
     # init model with correctly-shaped dummy inputs
     dummy_board = jnp.zeros((1, BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=jnp.float32)
@@ -382,7 +397,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         board_state=dummy_board,
         aux_features=dummy_aux,
     )["params"]
-    tx = optax.adam(lr)
+    tx = optax.adam(args.lr)
     st = train_state.TrainState.create(apply_fn=None, params=params, tx=tx)
 
     buf_board, buf_aux, buf_tgt = [], [], []
@@ -394,7 +409,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         if len(afterstates) == 0:
             return 0, state  # no-op fallback
         # epsilon-greedy: random action sometimes
-        if np.random.rand() < eps_greedy:
+        if np.random.rand() < args.eps_greedy:
             ns = afterstates[np.random.randint(len(afterstates))]
             r = py_reward(ns, player)
             return r, ns
@@ -412,12 +427,25 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         r = py_reward(ns, player)
         return r, ns
 
+    # Setup checkpoint directory
+    ckpt_dir = os.path.abspath(args.ckpt_dir)
+    os.makedirs(ckpt_dir, exist_ok=True)
+
     t0 = time.time()
     loss = 0.0  # Initialize loss for logging
     # _new_game() returns (player, dice, state)
     player, _dice, state = _new_game()
 
-    for it in range(1, steps + 1):
+    print(f"Starting TD(0) training:")
+    print(f"  Steps: {args.steps}")
+    print(f"  Learning rate: {args.lr}")
+    print(f"  Epsilon-greedy: {args.eps_greedy}")
+    print(f"  Batch size: {args.batch}")
+    print(f"  Seed: {args.seed}")
+    print(f"  Checkpoint dir: {ckpt_dir}")
+    print()
+
+    for it in range(1, args.steps + 1):
         b, a = encode(state, player)
         r, next_state = pick_action(state, player)
 
@@ -438,7 +466,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
             buf_board.append(b); buf_aux.append(a); buf_tgt.append(tgt)
             state, player = next_state, -player
 
-        if len(buf_tgt) >= batch:
+        if len(buf_tgt) >= args.batch:
             board = jnp.asarray(np.stack(buf_board))
             aux = jnp.asarray(np.stack(buf_aux))
             target = jnp.asarray(np.array(buf_tgt, dtype=np.float32))
@@ -446,23 +474,43 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
             st = st.apply_gradients(grads=grads)
             buf_board, buf_aux, buf_tgt = [], [], []
 
-        if it % 500 == 0:
+        if it % args.log_every == 0:
             dt = time.time() - t0
-            print(f"step {it}/{steps}  last_loss={float(loss):.4f}  elapsed={dt:.1f}s")
+            rate = it / dt if dt > 0 else 0
+            progress_percent = (it / args.steps) * 100
+            eta_seconds = (args.steps - it) / rate if rate > 0 else float('inf')
+            eta_minutes = eta_seconds / 60
+            
+            print(f"[step {it:6d}/{args.steps}] "
+                  f"loss={float(loss):.6f}  "
+                  f"steps/s={rate:.3f}  "
+                  f"progress={progress_percent:.1f}%  "
+                  f"elapsed={dt/60:.1f}min", flush=True)
+            
+            if eta_minutes < 60:
+                print(f"  ETA: {eta_minutes:.1f} min", flush=True)
+            else:
+                print(f"  ETA: {eta_minutes/60:.1f} hr", flush=True)
 
-    print("done")
+        if args.save_every is not None and it % args.save_every == 0:
+            ckpt_path = checkpoints.save_checkpoint(
+                ckpt_dir=ckpt_dir,
+                target=st.params,
+                step=it,
+                overwrite=True,
+            )
+            print(f"  💾 CHECKPOINT SAVED: {ckpt_path} @ step {it}", flush=True)
+
+    print("\nTraining complete!")
 
     # Save final value network parameters
-    # Orbax requires absolute paths
-    ckpt_dir = os.path.abspath("checkpoints")
-    os.makedirs(ckpt_dir, exist_ok=True)
     ckpt_path = checkpoints.save_checkpoint(
         ckpt_dir=ckpt_dir,
         target=st.params,
-        step=steps,
+        step=args.steps,
         overwrite=True,
     )
-    print(f"Saved final params to {ckpt_path}")
+    print(f"Saved final checkpoint to: {ckpt_path}")
 
 if __name__ == "__main__":
     main()
