@@ -349,7 +349,8 @@ def main():
             else:
                 print(f" ETA: {eta_hours:.1f} hr ({eta_minutes:.1f} min)")
 
-    ckpt_dir = os.path.abspath("checkpoints")
+    # Save checkpoint with method name in folder path
+    ckpt_dir = os.path.abspath(f"checkpoints_{args.train_search}")
     os.makedirs(ckpt_dir, exist_ok=True)
     ckpt_path = checkpoints.save_checkpoint(
         ckpt_dir,
