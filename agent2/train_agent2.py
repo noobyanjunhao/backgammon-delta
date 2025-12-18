@@ -1,4 +1,14 @@
 import os
+import sys
+
+# Add parent directory to path so we can import from root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Set JAX memory settings BEFORE importing jax to avoid OOM errors
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'  # Use only 70% of GPU memory
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Don't preallocate all memory
+os.environ['XLA_FLAGS'] = '--xla_gpu_enable_command_buffer='  # Disable CUDA graphs
+
 import time
 import argparse
 import numpy as np
@@ -17,8 +27,8 @@ from backgammon_engine import (
     NUM_POINTS,
     W_BAR, B_BAR, W_OFF, B_OFF,
 )
-from agent2_value_net import Agent2ValueNet
-from agent2_encode import encode_agent2, BOARD_LENGTH, CONV_INPUT_CHANNELS, AUX_INPUT_SIZE
+from agent2.agent2_value_net import Agent2ValueNet
+from agent2.agent2_encode import encode_agent2, BOARD_LENGTH, CONV_INPUT_CHANNELS, AUX_INPUT_SIZE
 
 
 # -----------------------------
