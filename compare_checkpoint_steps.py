@@ -32,10 +32,13 @@ from backgammon_value_net import (
     CONV_INPUT_CHANNELS,
     AUX_INPUT_SIZE,
 )
-from train_value_td0 import actions_py, encode, py_reward, v_apply
+from train_value_td0 import actions_py, encode, py_reward
 
 # Fixed batch size for JIT compilation (avoids recompilation on every move)
 EVAL_BATCH = 256  # Use 512 on A100 if you have more memory
+
+# Create module instance once outside JIT to avoid reinitialization issues
+_value_net = ValueNet()
 
 
 @jax.jit
@@ -45,8 +48,11 @@ def value_apply_fixed(params, board, aux):
     This function is JIT-compiled with a fixed batch size (EVAL_BATCH)
     to avoid recompilation on every move. The input must always be
     shape (EVAL_BATCH, 24, 15) for board and (EVAL_BATCH, 6) for aux.
+    
+    Uses a module instance created outside JIT to avoid parameter
+    initialization issues during tracing.
     """
-    return ValueNet().apply(
+    return _value_net.apply(
         {"params": params},
         board_state=board,
         aux_features=aux,
