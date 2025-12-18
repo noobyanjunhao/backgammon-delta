@@ -112,10 +112,37 @@ def single_value_and_grad(params, board, aux):
 batched_value_and_grad = jax.jit(jax.vmap(single_value_and_grad, in_axes=(None, 0, 0)))
 
 @jax.jit
-def batched_value_apply(params, board_batch, aux_batch):
-    """Batched value evaluation only"""
+def value_apply(params, board_batch, aux_batch):
+    """Batched value evaluation only (JIT-compiled)"""
     v = _value_net.apply({"params": params}, board_state=board_batch, aux_features=aux_batch)
     return v.squeeze(-1)  # (B,)
+
+def batched_values(params, boards_np, aux_np, eval_batch):
+    """
+    Evaluate N states with FIXED eval_batch to avoid recompiles and OOM.
+    Chunks large batches into smaller ones.
+    """
+    n = boards_np.shape[0]
+    out = np.empty((n,), dtype=np.float32)
+    
+    for i in range(0, n, eval_batch):
+        b = boards_np[i:i + eval_batch]
+        a = aux_np[i:i + eval_batch]
+        m = b.shape[0]
+        if m < eval_batch:
+            pad = eval_batch - m
+            b = np.pad(b, ((0, pad), (0, 0), (0, 0)), mode="constant")
+            a = np.pad(a, ((0, pad), (0, 0)), mode="constant")
+        
+        v = value_apply(
+            params,
+            jnp.asarray(b, dtype=jnp.float32),
+            jnp.asarray(a, dtype=jnp.float32),
+        )
+        v = np.array(v, dtype=np.float32)[:m]
+        out[i:i + m] = v
+    
+    return out
 
 
 # -----------------------------
@@ -213,9 +240,8 @@ def choose_action_1ply(state, player, dice, params, eval_batch=8192):
         boards[i] = b
         auxs[i] = a
     
-    # Batched evaluation
-    vals = batched_value_apply(params, jnp.asarray(boards), jnp.asarray(auxs))
-    vals = np.array(vals)
+    # Batched evaluation with chunking
+    vals = batched_values(params, boards, auxs, eval_batch=eval_batch)
     
     # Choose move with best value (from next player's perspective, so minimize)
     best = int(np.argmin(vals))
@@ -263,9 +289,8 @@ def choose_action_2ply_fast(state, player, dice, params, eval_batch, debug=False
         boards[i] = b
         auxs[i] = a
     
-    # Batched value evaluation
-    vals_u = batched_value_apply(params, jnp.asarray(boards), jnp.asarray(auxs))
-    vals_u = np.array(vals_u)
+    # Batched value evaluation with chunking to avoid OOM
+    vals_u = batched_values(params, boards, auxs, eval_batch=eval_batch)
     
     min_per_aj = np.full((nA, 21), np.inf, dtype=np.float32)
     for a_idx, s_a in enumerate(after_a):
@@ -393,7 +418,7 @@ def main():
                 # Encode next state from next player's perspective
                 b_n, a_n = encode_agent2(next_state, -players[i])
                 v_n = float(np.array(
-                    batched_value_apply(
+                    value_apply(
                         params,
                         jnp.asarray(b_n[None, ...], dtype=jnp.float32),
                         jnp.asarray(a_n[None, ...], dtype=jnp.float32),
