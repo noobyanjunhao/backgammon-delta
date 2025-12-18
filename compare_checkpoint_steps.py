@@ -34,10 +34,18 @@ from backgammon_value_net import (
 )
 from train_value_td0 import actions_py, encode, py_reward, v_apply
 
+# Fixed batch size for JIT compilation (avoids recompilation on every move)
+EVAL_BATCH = 256  # Use 512 on A100 if you have more memory
+
 
 @jax.jit
-def value_apply(params, board, aux):
-    """Apply value network to a batch of states."""
+def value_apply_fixed(params, board, aux):
+    """Apply value network to a fixed-size batch of states.
+    
+    This function is JIT-compiled with a fixed batch size (EVAL_BATCH)
+    to avoid recompilation on every move. The input must always be
+    shape (EVAL_BATCH, 24, 15) for board and (EVAL_BATCH, 6) for aux.
+    """
     return ValueNet().apply(
         {"params": params},
         board_state=board,
@@ -86,10 +94,28 @@ def pick_action_greedy(state: np.ndarray, player: int, params: dict, eps: float 
     if len(boards) == 0:
         return 0.0, state
     
-    boards = jnp.asarray(np.stack(boards))
-    auxs = jnp.asarray(np.stack(auxs))
-    vals = value_apply(params, boards, auxs)
-    best = int(jnp.argmin(vals))  # Minimize opponent's value
+    boards_np = np.asarray(boards, dtype=np.float32)
+    auxs_np = np.asarray(auxs, dtype=np.float32)
+    
+    # Evaluate in FIXED batches to avoid JAX recompiling every move
+    vals_all = []
+    n = boards_np.shape[0]
+    for i in range(0, n, EVAL_BATCH):
+        b = boards_np[i:i+EVAL_BATCH]
+        a = auxs_np[i:i+EVAL_BATCH]
+        
+        # Pad last batch to EVAL_BATCH
+        if b.shape[0] < EVAL_BATCH:
+            pad = EVAL_BATCH - b.shape[0]
+            b = np.pad(b, ((0, pad), (0, 0), (0, 0)), mode="constant")
+            a = np.pad(a, ((0, pad), (0, 0)), mode="constant")
+        
+        v = value_apply_fixed(params, jnp.asarray(b), jnp.asarray(a))
+        v = np.array(v)  # Bring back to numpy
+        vals_all.append(v[:min(EVAL_BATCH, n - i)])
+    
+    vals = np.concatenate(vals_all, axis=0)
+    best = int(np.argmin(vals))  # Minimize opponent's value
     
     next_state = afterstates[best]
     reward = py_reward(next_state, player)
@@ -207,9 +233,13 @@ def play_games(
         
         total_turns += turns
         
+        # Progress update every 10 games (so it doesn't look frozen)
+        if (game + 1) % 10 == 0:
+            print(f"Played {game+1}/{games} games... A={a_wins} B={b_wins}", flush=True)
+        
         if verbose and (game + 1) % 100 == 0:
             print(f"Game {game + 1}/{games}: A={a_wins} (gammons={a_gammons}, bg={a_backgammons}), "
-                  f"B={b_wins} (gammons={b_gammons}, bg={b_backgammons})")
+                  f"B={b_wins} (gammons={b_gammons}, bg={b_backgammons})", flush=True)
     
     avg_turns = total_turns / games
     return a_wins, b_wins, a_gammons, b_gammons, a_backgammons, b_backgammons, avg_turns
