@@ -280,10 +280,12 @@ class TwoPlyTD0Trainer:
             if it == 1:
                 print(f"\n[Step 1] First action selection (JIT compilation may take 5-30 min)...", flush=True)
             elif it % 10 == 0:
-                print(f"  [Step {it}] Picking action...", flush=True)
+                print(f"\n[Step {it}] Selecting action with 2-ply search...", flush=True)
             r, next_state = self._pick_action(state, player)
             if it == 1:
-                print(f"[Step 1] First action completed! Training will be faster now.\n", flush=True)
+                print(f"[Step 1] ✓ First action completed! Training will be faster now.\n", flush=True)
+            elif it % 10 == 0:
+                print(f"[Step {it}] ✓ Action selected", flush=True)
 
             # Determine TD target: if terminal then r; else -V(next_state).
             if r != 0:
@@ -321,7 +323,21 @@ class TwoPlyTD0Trainer:
             if it % 10 == 0:
                 dt = time.time() - t0
                 rate = it / dt if dt > 0 else 0
-                print(f"step {it}/{self.steps}  last_loss={last_loss:.4f}  elapsed={dt:.1f}s  rate={rate:.3f} steps/s", flush=True)
+                eta_seconds = (self.steps - it) / rate if rate > 0 else 0
+                eta_minutes = eta_seconds / 60
+                eta_hours = eta_minutes / 60
+                print(f"\n{'='*70}")
+                print(f"PROGRESS UPDATE - Step {it}/{self.steps}")
+                print(f"{'='*70}")
+                print(f"  Loss: {last_loss:.6f}")
+                print(f"  Elapsed time: {dt/60:.1f} minutes ({dt/3600:.2f} hours)")
+                print(f"  Training rate: {rate:.4f} steps/second")
+                if eta_hours < 1:
+                    print(f"  Estimated time remaining: {eta_minutes:.1f} minutes")
+                else:
+                    print(f"  Estimated time remaining: {eta_hours:.1f} hours ({eta_minutes:.1f} minutes)")
+                print(f"  Progress: {100.0 * it / self.steps:.2f}%")
+                print(f"{'='*70}\n", flush=True)
             
             # Periodic checkpoint saving (every 1000 steps) to avoid losing progress
             if it % 1000 == 0 and it > 0:
@@ -330,7 +346,9 @@ class TwoPlyTD0Trainer:
                 ckpt_path = checkpoints.save_checkpoint(
                     ckpt_dir=ckpt_dir, target=self.state.params, step=it, overwrite=True
                 )
-                print(f"  [Checkpoint saved] step {it} -> {ckpt_path}", flush=True)
+                print(f"\n💾 CHECKPOINT SAVED at step {it}")
+                print(f"   Location: {ckpt_path}")
+                print(f"   You can resume from here if training is interrupted.\n", flush=True)
 
         # Save the final parameters.
         ckpt_dir = os.path.abspath("checkpoints_2ply")
