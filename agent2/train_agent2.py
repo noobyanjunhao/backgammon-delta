@@ -255,6 +255,7 @@ def main():
     ap.add_argument("--eval_batch", type=int, default=8192, help="Batch size for value evaluation (default: 8192)")
     ap.add_argument("--log_every", type=int, default=200, help="Print progress every N steps (default: 200)")
     ap.add_argument("--save_every", type=int, default=2000, help="Save checkpoint every N steps (default: 2000)")
+    ap.add_argument("--ckpt_dir", type=str, default="checkpoints_agent2", help="Checkpoint directory (default: checkpoints_agent2)")
     ap.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
     ap.add_argument("--debug_2ply", action="store_true", help="Print 2-ply deduplication stats")
     args = ap.parse_args()
@@ -270,9 +271,18 @@ def main():
     # eligibility traces
     z = tree_zeros_like(params)
 
-    # Use consistent checkpoint directory format: checkpoints_tdlambda_2ply
-    ckpt_dir = os.path.abspath("checkpoints_tdlambda_2ply")
+    # Setup checkpoint directory
+    ckpt_dir = os.path.abspath(args.ckpt_dir)
     os.makedirs(ckpt_dir, exist_ok=True)
+    
+    print(f"Agent 2 TD(λ) Training Configuration:")
+    print(f"  Steps: {args.steps}")
+    print(f"  Learning rate (alpha): {args.alpha}")
+    print(f"  Gamma: {args.gamma}")
+    print(f"  Lambda: {args.lam}")
+    print(f"  Eval batch size: {args.eval_batch}")
+    print(f"  Checkpoint directory: {ckpt_dir}")
+    print()
 
     player, dice, state = _new_game()
 
