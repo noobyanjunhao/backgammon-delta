@@ -249,19 +249,37 @@ def choose_action_1ply(state, player, dice, params, eval_batch=8192):
 
 
 def choose_action_2ply_fast(state, player, dice, params, eval_batch, debug=False):
-    """2-ply search with deduplication (copied from train_agent2.py)"""
+    """
+    Exact 2-ply:
+      for each a:
+        sum_j P(d_j) [ min_{aopp} V(S_{a,j,aopp}) ]
+      choose argmax.
+
+    Speed tricks:
+      - two-pass counting and preallocation (no Python append hot path)
+      - deduplicate identical afterstates across all (a,j,aopp)
+      - one GPU eval for all unique states (batched)
+      - CPU reduction by indices
+    """
     moves_a, after_a = _actions(state, np.int8(player), dice)
     moves_a = list(moves_a)
     after_a = [np.asarray(s, dtype=np.int8) for s in after_a]
     nA = len(after_a)
     if nA == 0:
         return None, state
-    
+
     opp_player = -player
+
+    # -------- Pass 1: count how many opponent afterstates per (a,j) and collect keys for dedup
+    # We'll build:
+    #   group_counts[a,j] = number of opponent afterstates (before dedup)
     group_counts = np.zeros((nA, 21), dtype=np.int32)
+
+    # We also build a dict for dedup mapping state_key -> unique_index
     uniq_index = {}
-    uniq_states = []
-    
+    uniq_states = []  # store representative state arrays (int8)
+
+    # During pass1, just enumerate and populate uniq_index (dedup) and group_counts.
     for a_idx, s_a in enumerate(after_a):
         for j_idx, d in enumerate(DICE21):
             moves_o, after_o = _actions(s_a, np.int8(opp_player), d)
@@ -280,27 +298,37 @@ def choose_action_2ply_fast(state, player, dice, params, eval_batch, debug=False
                     if k not in uniq_index:
                         uniq_index[k] = len(uniq_states)
                         uniq_states.append(s)
-    
+
     U = len(uniq_states)
-    boards = np.empty((U, BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=np.float32)
+    if debug:
+        total_raw = int(group_counts.sum())
+        print(f"2-ply enumeration: actions={nA}, raw_states={total_raw}, unique_states={U}")
+
+    # -------- Encode all unique states once
+    boards = np.empty((U, 24, 15), dtype=np.float32)
     auxs = np.empty((U, AUX_INPUT_SIZE), dtype=np.float32)
     for i, s in enumerate(uniq_states):
-        b, a = encode_agent2(s, player)
+        b, a = encode_agent2(s, player)  # IMPORTANT: V is from current player's perspective
         boards[i] = b
         auxs[i] = a
-    
-    # Batched value evaluation with chunking to avoid OOM
-    vals_u = batched_values(params, boards, auxs, eval_batch=eval_batch)
-    
+
+    # -------- GPU evaluate once (or big batches)
+    vals_u = batched_values(params, boards, auxs, eval_batch=eval_batch)  # (U,)
+
+    # -------- Pass 2: compute min per (a,j) by scanning again but now only indexing vals_u
+    # min_per_aj[a,j] = min over opponent moves
     min_per_aj = np.full((nA, 21), np.inf, dtype=np.float32)
+
     for a_idx, s_a in enumerate(after_a):
         for j_idx, d in enumerate(DICE21):
             moves_o, after_o = _actions(s_a, np.int8(opp_player), d)
             after_o = list(after_o)
+
             if len(after_o) == 0:
                 u = uniq_index[_state_key(s_a)]
                 vmin = vals_u[u]
             else:
+                # compute min over opponent afterstates
                 vmin = np.inf
                 for s in after_o:
                     s = np.asarray(s, dtype=np.int8)
@@ -309,8 +337,8 @@ def choose_action_2ply_fast(state, player, dice, params, eval_batch, debug=False
                     if v < vmin:
                         vmin = v
             min_per_aj[a_idx, j_idx] = vmin
-    
-    expected = (min_per_aj * PROBS21[None, :]).sum(axis=1)
+
+    expected = (min_per_aj * PROBS21[None, :]).sum(axis=1)  # (nA,)
     best = int(np.argmax(expected))
     return moves_a[best], after_a[best]
 
