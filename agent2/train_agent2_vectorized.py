@@ -305,7 +305,7 @@ def main():
     ap.add_argument("--save_every", type=int, default=2000, help="Save checkpoint every N steps")
     ap.add_argument("--ckpt_dir", type=str, default="checkpoints_agent2_vectorized", help="Checkpoint directory (default: checkpoints_agent2_vectorized)")
     ap.add_argument("--seed", type=int, default=0, help="Random seed")
-    ap.add_argument("--use_2ply", action="store_true", help="Use 2-ply search during training (slower but stronger)")
+    ap.add_argument("--use_1ply", action="store_true", help="Use 1-ply search during training (faster but deviates from spec - use only for speed testing)")
     args = ap.parse_args()
     
     rng = np.random.default_rng(args.seed)
@@ -337,7 +337,9 @@ def main():
     print(f"  Learning rate (alpha): {args.alpha}")
     print(f"  Gamma: {args.gamma}")
     print(f"  Lambda: {args.lam}")
-    print(f"  Use 2-ply: {args.use_2ply}")
+    print(f"  Use 2-ply: {not args.use_1ply} (spec-compliant)")
+    if args.use_1ply:
+        print(f"  ⚠️  WARNING: Using 1-ply deviates from spec. Use only for speed testing!")
     print(f"  Eval batch size: {args.eval_batch}")
     print(f"  Checkpoint directory: {ckpt_dir}")
     print()
@@ -370,14 +372,14 @@ def main():
         v_next = np.zeros(B, dtype=np.float32)
         
         for i in range(B):
-            if args.use_2ply:
-                # Use 2-ply (slower but stronger)
+            if args.use_1ply:
+                # Use 1-ply (faster but deviates from spec - for speed testing only)
+                move, next_state = choose_action_1ply(states[i], int(players[i]), dice[i], params, args.eval_batch)
+            else:
+                # Use 2-ply (spec-compliant, matches original train_agent2.py)
                 move, next_state = choose_action_2ply_fast(
                     states[i], int(players[i]), dice[i], params, args.eval_batch, debug=False
                 )
-            else:
-                # Use 1-ply (faster training)
-                move, next_state = choose_action_1ply(states[i], int(players[i]), dice[i], params, args.eval_batch)
             
             if move is None:
                 next_state = states[i]
