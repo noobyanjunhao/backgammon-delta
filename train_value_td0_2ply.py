@@ -25,6 +25,11 @@ consider caching and vectorising portions of the search.
 """
 
 import os
+# Set JAX memory settings BEFORE importing jax to avoid OOM errors
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'  # Use only 70% of GPU memory
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Don't preallocate all memory
+os.environ['XLA_FLAGS'] = '--xla_gpu_enable_command_buffer='  # Disable CUDA graphs if needed
+
 import time
 import argparse
 from typing import List, Tuple
@@ -197,6 +202,8 @@ class TwoPlyTD0Trainer:
         if len(all_boards) > 0:
             values = []
             num_batches = (len(all_boards) + self.eval_batch_size - 1) // self.eval_batch_size
+            if num_batches > 10:  # Only print if there are many batches
+                print(f"    Evaluating {len(all_boards)} states in {num_batches} batches...", flush=True)
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * self.eval_batch_size
                 end_idx = min(start_idx + self.eval_batch_size, len(all_boards))
@@ -244,21 +251,39 @@ class TwoPlyTD0Trainer:
 
     def train(self) -> None:
         """Run the TD(0) training loop with two‐ply action selection."""
+        print("=" * 70)
+        print("Starting 2-ply TD(0) training")
+        print(f"Steps: {self.steps}, Batch size: {self.batch_size}, Eval batch: {self.eval_batch_size}")
+        print("=" * 70)
+        print("\n⚠️  WARNING: First run will trigger JAX JIT compilation.")
+        print("   This can take 5-30 minutes. Please be patient...")
+        print("   You'll see 'Compiling...' messages if JAX is compiling.\n")
+        
         # Replay buffers for batch updates.
         buf_board: List[np.ndarray] = []
         buf_aux: List[np.ndarray] = []
         buf_tgt: List[float] = []
 
         # Initialise the first game.
+        print("Initializing first game...", flush=True)
         player, _dice, state = _new_game()
         t0 = time.time()
         last_loss = 0.0
+        
+        print("Starting training loop (first action selection will trigger compilation)...", flush=True)
+        print("=" * 70, flush=True)
 
         for it in range(1, self.steps + 1):
             # Encode the current state for TD(0).
             b, a = encode(state, player)
             # Select action using two‐ply search.
+            if it == 1:
+                print(f"\n[Step 1] First action selection (JIT compilation may take 5-30 min)...", flush=True)
+            elif it % 10 == 0:
+                print(f"  [Step {it}] Picking action...", flush=True)
             r, next_state = self._pick_action(state, player)
+            if it == 1:
+                print(f"[Step 1] First action completed! Training will be faster now.\n", flush=True)
 
             # Determine TD target: if terminal then r; else -V(next_state).
             if r != 0:
@@ -292,10 +317,20 @@ class TwoPlyTD0Trainer:
                 buf_aux.clear()
                 buf_tgt.clear()
 
-            # Periodic progress reporting.
-            if it % 500 == 0:
+            # Periodic progress reporting (every 10 steps for 2-ply since it's slow).
+            if it % 10 == 0:
                 dt = time.time() - t0
-                print(f"step {it}/{self.steps}  last_loss={last_loss:.4f}  elapsed={dt:.1f}s")
+                rate = it / dt if dt > 0 else 0
+                print(f"step {it}/{self.steps}  last_loss={last_loss:.4f}  elapsed={dt:.1f}s  rate={rate:.3f} steps/s", flush=True)
+            
+            # Periodic checkpoint saving (every 1000 steps) to avoid losing progress
+            if it % 1000 == 0 and it > 0:
+                ckpt_dir = os.path.abspath("checkpoints_2ply")
+                os.makedirs(ckpt_dir, exist_ok=True)
+                ckpt_path = checkpoints.save_checkpoint(
+                    ckpt_dir=ckpt_dir, target=self.state.params, step=it, overwrite=True
+                )
+                print(f"  [Checkpoint saved] step {it} -> {ckpt_path}", flush=True)
 
         # Save the final parameters.
         ckpt_dir = os.path.abspath("checkpoints_2ply")

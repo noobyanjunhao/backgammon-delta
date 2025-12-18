@@ -1,4 +1,10 @@
 import os
+import os
+# Set JAX memory settings BEFORE importing jax to avoid OOM errors
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'  # Use only 70% of GPU memory
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Don't preallocate all memory
+os.environ['XLA_FLAGS'] = '--xla_gpu_enable_command_buffer='  # Disable CUDA graphs if needed
+
 import time
 import numpy as np
 import jax
@@ -407,6 +413,7 @@ def main(steps=5000, lr=3e-4, eps_greedy=0.10, batch=256, seed=0):
         return r, ns
 
     t0 = time.time()
+    loss = 0.0  # Initialize loss for logging
     # _new_game() returns (player, dice, state)
     player, _dice, state = _new_game()
 
