@@ -174,14 +174,24 @@ def pick_action_2ply(
                     all_aux.append(a)
                     idx_list.append(len(all_boards) - 1)
                 idx_map[(i, j)] = idx_list
-    # Evaluate all batched states if any.
-    if len(all_boards) > 0:
-        boards_arr = jnp.asarray(np.stack(all_boards))
-        aux_arr = jnp.asarray(np.stack(all_aux))
-        values_jax = v_apply(params, boards_arr, aux_arr)
-        values = np.asarray(values_jax)
-    else:
-        values = np.zeros(0, dtype=np.float32)
+        # Evaluate all batched states in chunks to avoid OOM.
+        # Use a reasonable batch size (8192) to fit in GPU memory.
+        eval_batch_size = 8192
+        if len(all_boards) > 0:
+            values = []
+            num_batches = (len(all_boards) + eval_batch_size - 1) // eval_batch_size
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * eval_batch_size
+                end_idx = min(start_idx + eval_batch_size, len(all_boards))
+                batch_boards = all_boards[start_idx:end_idx]
+                batch_aux = all_aux[start_idx:end_idx]
+                boards_arr = jnp.asarray(np.stack(batch_boards))
+                aux_arr = jnp.asarray(np.stack(batch_aux))
+                values_jax = v_apply(params, boards_arr, aux_arr)
+                values.extend(np.asarray(values_jax).tolist())
+            values = np.array(values, dtype=np.float32)
+        else:
+            values = np.zeros(0, dtype=np.float32)
     # Accumulate expected values.
     for i, s1 in enumerate(afterstates):
         ev = 0.0

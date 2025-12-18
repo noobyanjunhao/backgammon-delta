@@ -93,12 +93,14 @@ class TwoPlyTD0Trainer:
         lr: float = 3e-4,
         eps_greedy: float = 0.05,
         batch_size: int = 256,
+        eval_batch_size: int = 8192,
         seed: int = 0,
     ):
         self.steps = steps
         self.lr = lr
         self.eps_greedy = eps_greedy
         self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size  # Batch size for 2-ply evaluation
         self.seed = seed
 
         # Build all possible sorted rolls once.
@@ -190,13 +192,22 @@ class TwoPlyTD0Trainer:
                         idx_list.append(len(all_boards) - 1)
                     idx_map[(i, j)] = idx_list
 
-        # Evaluate all gathered boards in one batch to minimise overhead.
+        # Evaluate all gathered boards in batches to avoid OOM.
+        # Process in chunks of eval_batch_size to fit in GPU memory.
         if len(all_boards) > 0:
-            boards_arr = jnp.asarray(np.stack(all_boards))
-            aux_arr = jnp.asarray(np.stack(all_aux))
-            # v_apply expects shape (B, 24, 15) and (B, AUX_INPUT_SIZE).
-            values_jax = v_apply(self.state.params, boards_arr, aux_arr)
-            values = np.asarray(values_jax)
+            values = []
+            num_batches = (len(all_boards) + self.eval_batch_size - 1) // self.eval_batch_size
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * self.eval_batch_size
+                end_idx = min(start_idx + self.eval_batch_size, len(all_boards))
+                batch_boards = all_boards[start_idx:end_idx]
+                batch_aux = all_aux[start_idx:end_idx]
+                boards_arr = jnp.asarray(np.stack(batch_boards))
+                aux_arr = jnp.asarray(np.stack(batch_aux))
+                # v_apply expects shape (B, 24, 15) and (B, AUX_INPUT_SIZE).
+                values_jax = v_apply(self.state.params, boards_arr, aux_arr)
+                values.extend(np.asarray(values_jax).tolist())
+            values = np.array(values, dtype=np.float32)
         else:
             values = np.zeros(0, dtype=np.float32)
 
@@ -305,10 +316,18 @@ def main():
     parser.add_argument(
         "--batch", type=int, default=256, help="Batch size for optimisation (default: 256)"
     )
+    parser.add_argument(
+        "--eval_batch", type=int, default=8192, help="Batch size for 2-ply evaluation (default: 8192)"
+    )
     parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
     args = parser.parse_args()
     trainer = TwoPlyTD0Trainer(
-        steps=args.steps, lr=args.lr, eps_greedy=args.eps_greedy, batch_size=args.batch, seed=args.seed
+        steps=args.steps,
+        lr=args.lr,
+        eps_greedy=args.eps_greedy,
+        batch_size=args.batch,
+        eval_batch_size=args.eval_batch,
+        seed=args.seed,
     )
     trainer.train()
 
