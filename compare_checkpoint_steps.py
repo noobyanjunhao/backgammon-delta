@@ -39,6 +39,8 @@ from evaluate_value_models import pick_action_greedy
 def load_checkpoint_at_step(method: str, step: int) -> dict:
     """Load checkpoint at a specific step from a training method.
     
+    Tries both the new location (checkpoints_{method}) and old location (checkpoints).
+    
     Args:
         method: Training method name ('1ply' or '2ply')
         step: Training step number
@@ -46,7 +48,10 @@ def load_checkpoint_at_step(method: str, step: int) -> dict:
     Returns:
         Model parameters dictionary
     """
-    ckpt_dir = os.path.abspath(f"checkpoints_{method}")
+    # Try new location first (checkpoints_1ply or checkpoints_2ply)
+    ckpt_dir_new = os.path.abspath(f"checkpoints_{method}")
+    # Try old location (checkpoints - for backwards compatibility)
+    ckpt_dir_old = os.path.abspath("checkpoints")
     
     # Create dummy parameters to get the structure right
     key = jax.random.PRNGKey(0)
@@ -54,16 +59,31 @@ def load_checkpoint_at_step(method: str, step: int) -> dict:
     dummy_aux = jnp.zeros((1, AUX_INPUT_SIZE), dtype=jnp.float32)
     params = ValueNet().init(key, board_state=dummy_board, aux_features=dummy_aux)["params"]
     
-    # Try to restore checkpoint
-    try:
-        restored = checkpoints.restore_checkpoint(ckpt_dir, target=params, step=step)
-        print(f"✓ Loaded checkpoint from {ckpt_dir} at step {step}")
-        return restored
-    except Exception as e:
-        print(f"✗ Error loading checkpoint at step {step} from {ckpt_dir}: {e}", file=sys.stderr)
-        print(f"  Make sure the checkpoint exists. Checkpoint should be at:", file=sys.stderr)
-        print(f"  {ckpt_dir}/checkpoint_{step}.orbax-checkpoint", file=sys.stderr)
-        sys.exit(1)
+    # Try new location first
+    if os.path.exists(ckpt_dir_new):
+        try:
+            restored = checkpoints.restore_checkpoint(ckpt_dir_new, target=params, step=step)
+            print(f"✓ Loaded checkpoint from {ckpt_dir_new} at step {step}")
+            return restored
+        except Exception as e:
+            pass  # Try old location
+    
+    # Try old location (for backwards compatibility with old checkpoints)
+    if os.path.exists(ckpt_dir_old):
+        try:
+            restored = checkpoints.restore_checkpoint(ckpt_dir_old, target=params, step=step)
+            print(f"✓ Loaded checkpoint from {ckpt_dir_old} (old location) at step {step}")
+            return restored
+        except Exception as e:
+            pass
+    
+    # Neither location worked
+    print(f"✗ Error loading checkpoint at step {step}", file=sys.stderr)
+    print(f"  Tried locations:", file=sys.stderr)
+    print(f"    - {ckpt_dir_new}", file=sys.stderr)
+    print(f"    - {ckpt_dir_old} (old location)", file=sys.stderr)
+    print(f"  Make sure the checkpoint exists at one of these locations.", file=sys.stderr)
+    sys.exit(1)
 
 
 def run_evaluation(
