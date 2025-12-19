@@ -185,12 +185,13 @@ def ppo_choose_action(state, player, dice, params, max_moves=128):
     
     return moves[act], afterstates[act]
 
-def play_game(agent2_params, ppo_params):
-    """Play one game between Agent 2 and PPO
+def play_game(white_params, black_params, white_is_agent2=True):
+    """Play one game between two agents
     
     Args:
-        agent2_params: Agent 2 parameters (plays as +1/White)
-        ppo_params: PPO parameters (plays as -1/Black)
+        white_params: Parameters for White player (+1)
+        black_params: Parameters for Black player (-1)
+        white_is_agent2: True if White is Agent 2, False if White is PPO
     """
     player, dice, state = _new_game()
     turns = 0
@@ -199,8 +200,8 @@ def play_game(agent2_params, ppo_params):
         turns += 1
         dice = _roll_dice()
         
-        if player == 1:  # Agent 2's turn (White)
-            if agent2_params is None:
+        if player == 1:  # White's turn
+            if white_params is None:
                 # Random
                 moves, afterstates = _actions(state, np.int8(player), dice)
                 moves = list(moves)
@@ -210,11 +211,14 @@ def play_game(agent2_params, ppo_params):
                 else:
                     next_state = afterstates[np.random.randint(len(afterstates))]
             else:
-                move, next_state = agent2_choose_action_2ply(state, player, dice, agent2_params)
+                if white_is_agent2:
+                    move, next_state = agent2_choose_action_2ply(state, player, dice, white_params)
+                else:
+                    move, next_state = ppo_choose_action(state, player, dice, white_params)
                 if move is None:
                     next_state = state
-        else:  # PPO's turn (Black)
-            if ppo_params is None:
+        else:  # Black's turn
+            if black_params is None:
                 # Random
                 moves, afterstates = _actions(state, np.int8(player), dice)
                 moves = list(moves)
@@ -224,7 +228,12 @@ def play_game(agent2_params, ppo_params):
                 else:
                     next_state = afterstates[np.random.randint(len(afterstates))]
             else:
-                move, next_state = ppo_choose_action(state, player, dice, ppo_params)
+                if white_is_agent2:
+                    # Black is PPO
+                    move, next_state = ppo_choose_action(state, player, dice, black_params)
+                else:
+                    # Black is Agent 2
+                    move, next_state = agent2_choose_action_2ply(state, player, dice, black_params)
                 if move is None:
                     next_state = state
         
@@ -232,9 +241,9 @@ def play_game(agent2_params, ppo_params):
         if r != 0:
             # Game over
             if player == 1:
-                return 1, abs(r), turns  # Agent 2 wins
+                return 1, abs(r), turns  # White wins
             else:
-                return -1, abs(r), turns  # PPO wins
+                return -1, abs(r), turns  # Black wins
         
         state = next_state
         player = -player
@@ -289,12 +298,13 @@ def main():
         # Alternate who goes first (swap colors)
         if i % 2 == 0:
             # Agent 2 as White (+1), PPO as Black (-1)
-            winner, score, turns = play_game(agent2_params, ppo_params)
+            winner, score, turns = play_game(agent2_params, ppo_params, white_is_agent2=True)
+            # winner: +1 = White (Agent 2) wins, -1 = Black (PPO) wins
         else:
-            # PPO as White (+1), Agent 2 as Black (-1) - swap by passing params in reverse
-            # But we need to swap the logic - let's just swap the params and flip the result
-            temp_winner, score, turns = play_game(ppo_params, agent2_params)
-            winner = -temp_winner  # Flip winner since we swapped colors
+            # PPO as White (+1), Agent 2 as Black (-1)
+            temp_winner, score, turns = play_game(ppo_params, agent2_params, white_is_agent2=False)
+            # Flip winner: +1 (White/PPO wins) -> -1 (PPO wins), -1 (Black/Agent2 wins) -> +1 (Agent2 wins)
+            winner = -temp_winner
         
         total_turns += turns
         
