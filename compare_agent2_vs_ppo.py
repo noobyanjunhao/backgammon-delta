@@ -254,13 +254,17 @@ def main():
     print(f"Games: {args.games}")
     print("=" * 70)
     
+    # Convert to absolute paths
+    agent2_ckpt = os.path.abspath(args.agent2)
+    ppo_ckpt = os.path.abspath(args.ppo)
+    
     # Load Agent 2
     print("\nLoading Agent 2 checkpoint...")
     key = jax.random.PRNGKey(0)
     dummy_board = jnp.zeros((1, BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=jnp.float32)
     dummy_aux = jnp.zeros((1, AUX_INPUT_SIZE), dtype=jnp.float32)
     agent2_params_init = Agent2ValueNet().init(key, board_state=dummy_board, aux_features=dummy_aux)["params"]
-    agent2_params = checkpoints.restore_checkpoint(args.agent2, target=agent2_params_init)
+    agent2_params = checkpoints.restore_checkpoint(agent2_ckpt, target=agent2_params_init)
     print("✓ Agent 2 loaded")
     
     # Load PPO
@@ -268,7 +272,7 @@ def main():
     dummy_board_ppo = jnp.zeros((1, BOARD_LENGTH, CONV_INPUT_CHANNELS), dtype=jnp.float32)
     dummy_aux_ppo = jnp.zeros((1, AUX_INPUT_SIZE), dtype=jnp.float32)
     ppo_params_init = BackgammonPPONet().init(key, board_state=dummy_board_ppo, aux_features=dummy_aux_ppo)["params"]
-    ppo_params = checkpoints.restore_checkpoint(args.ppo, target=ppo_params_init)
+    ppo_params = checkpoints.restore_checkpoint(ppo_ckpt, target=ppo_params_init)
     print("✓ PPO loaded")
     
     # Play games
